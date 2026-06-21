@@ -1,5 +1,9 @@
 # nature-downloader
 
+<p align="center">
+  <img src="assets/banner.jpg" alt="nature-downloader — 补齐 nature 工作流缺失的 PDF 落地环节" width="100%">
+</p>
+
 nature- skill 系列构筑了一条完整的学术研究链路——检索、阅读、引用、润色、写作、审稿回复、图表、数据，再到汇报和专利转化，覆盖科研工作者从读到写的全流程，专业度高、边界清晰。
 
 但痛点是，nature- 系列唯独解决不了真实 PDF 下载的问题。出版商付费墙、机构认证、人机验证拦在前面——nature-academic-search 能找到题目和摘要，却下不到全文；nature-reader 能解读 PDF，却拿不到 PDF 本体。用户明明在自己的图书馆里能看到全文，却无法在 agent 里自动拿到那份 PDF。每次都得切回浏览器手动下载，再拖进对话框，整个 nature- 工作流的自动化在这一步断掉。
