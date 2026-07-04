@@ -180,6 +180,33 @@ class ConfigWizardTest(unittest.TestCase):
         data = json.loads(result.stdout)
         self.assertEqual(data["entry_type"], "resource_portal")
 
+    def test_cli_cnki_url_updates_existing_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ.copy()
+            env["LIT_DL_CONFIG_DIR"] = tmp
+            preset = subprocess.run(
+                [sys.executable, str(SCRIPT), "preset", "交大"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(preset.returncode, 0, preset.stderr)
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "cnki-url", "https://kns.cnki.net/kns8s/defaultresult/index"],
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertTrue(data["ok"])
+            saved = json.loads((Path(tmp) / "school.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["discovery"]["cnki_url"], "https://kns.cnki.net/kns8s/defaultresult/index")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from config import CONFIG_FILE, config_exists, load_config, validate  # noqa: E402
+from config import CONFIG_FILE, config_exists, load_config, save_config, validate  # noqa: E402
 from health_check import health_check  # noqa: E402
 from schools_loader import list_school_names  # noqa: E402
 from wizard import Wizard, infer_access_from_url  # noqa: E402
@@ -62,6 +62,17 @@ def cmd_show(_: argparse.Namespace) -> int:
     return 0 if not errors else 1
 
 
+def cmd_cnki_url(args: argparse.Namespace) -> int:
+    cfg = load_config()
+    if cfg is None:
+        print(f"尚未配置，配置文件路径：{CONFIG_FILE}")
+        return 2
+    cfg.setdefault("discovery", {})["cnki_url"] = args.url
+    path = save_config(cfg)
+    print(json.dumps({"ok": True, "path": str(path), "cnki_url": args.url}, ensure_ascii=False))
+    return 0
+
+
 def cmd_health(args: argparse.Namespace) -> int:
     result = health_check(force=args.force)
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -92,6 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("show", help="Show current configuration.")
     show.set_defaults(func=cmd_show)
+
+    cnki_url = sub.add_parser("cnki-url", help="Save the CNKI entry URL for Chinese literature downloads.")
+    cnki_url.add_argument("url", help="CNKI entry URL from the library portal, or the public CNKI search entry.")
+    cnki_url.set_defaults(func=cmd_cnki_url)
 
     health = sub.add_parser("health", help="Run connectivity health check.")
     health.add_argument("--force", action="store_true", help="Ignore cached health result.")

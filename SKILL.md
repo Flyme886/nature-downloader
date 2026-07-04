@@ -9,11 +9,17 @@ metadata:
 
 This skill turns a user's legitimate institutional access into a repeatable process for configuring, finding, downloading, and reading academic full text. It combines a first-run library-resource configuration wizard (`src/`, `data/`, `scripts/configure_school.py`) with browser-based download scripts (`scripts/batch_download.mjs`, `scripts/browser_pdf_downloader.mjs`) that reuse the user's already-authenticated Chrome session.
 
-The currently verified real download route is the SJTU / jAccount / CARSI / Web of Science route. Other institutions should start from the user's actual library resource URL, because resource portals, CAS callbacks, EZproxy, WebVPN, and database detail pages reveal the live authorization path more reliably than a school name.
+Verified routes are examples, not defaults. Every institution should start from the user's actual library resource URL, because resource portals, CAS callbacks, EZproxy, WebVPN, IP-authenticated database pages, and database detail pages reveal the live authorization path more reliably than a school name.
 
 > **Access model — read this first.** For a new user, do not begin by asking for the school name or by applying a preset. First ask for the library electronic-resource link they actually use. Inspect that URL to classify the route as a resource portal, CAS/SSO login, CARSI/Shibboleth, EZproxy, WebVPN, IP-authorized database page, or publisher/database detail page. School presets are optional enrichment and fallback only.
 
 > **Main workflow.** First configure and save the user's real library resource entry. Let the user log in through Chrome when the route reaches institutional authentication. Reuse the saved entry plus the current browser login state for later papers. For each paper, try legitimate open-access sources first; if the article is open access, download directly. Otherwise use the library route. If the library route clearly has no permission, tell the user directly instead of treating it as a generic download failure.
+
+> **Chinese literature default.** When the user provides a Chinese title and no DOI/PDF URL/topic route, use the CNKI route by default. Reuse the user's current Chrome library/CNKI login state, prefer the configured `discovery.cnki_url` entry when present, and stop for the user if CNKI or the institution asks for login, QR, CAPTCHA, SMS/OTP, or any other verification.
+
+> **Browser-state principle.** Authorized downloads depend on the exact browser profile where the user is logged in. If a proxy, CDP session, or browser automation tool opens a fresh profile or a different browser with no login state, do not treat the failure as missing library permission. Switch to a control path that reuses the user's active browser session, or ask the user to authenticate in the controlled browser instance.
+
+> **Format principle.** PDF, HTML full text, and database-native formats such as CAJ are different deliverables. If the user asks for PDF only, require a real PDF link or `%PDF` response and report `no_authorized_pdf_found` / `pdf_fetch_failed` when none exists. Do not save CAJ, HTML, or a login page as if it were a PDF.
 
 ## First-Run Resource Configuration
 
@@ -37,7 +43,7 @@ python3 scripts/configure_school.py health --force
 Use school presets only when the user cannot provide a resource URL, or as a fallback after URL inference:
 
 ```bash
-python3 scripts/configure_school.py preset "上海交通大学"
+python3 scripts/configure_school.py preset "<school name>"
 python3 scripts/configure_school.py show
 python3 scripts/configure_school.py health --force
 ```
@@ -56,6 +62,8 @@ LIT_DL_CONFIG_DIR=/path/to/configdir
 
 The downloader reads this config automatically. If `discovery.web_of_science_url` is present, `scripts/batch_download.mjs` uses it as the Web of Science entry; otherwise it falls back to `https://webofscience.clarivate.cn/wos/woscc/basic-search`.
 
+For Chinese literature, the downloader also reads `discovery.cnki_url` when present. If absent, `scripts/batch_download.mjs --title "<中文题名>"` falls back to `https://kns.cnki.net/kns8s/defaultresult/index`.
+
 ## Resource URL Triage
 
 Classify the user-provided URL before choosing an access path:
@@ -71,19 +79,19 @@ webofscience / sciencedirect     Database or publisher entry; check whether it w
 
 If the URL is a login page with a `service=` parameter, treat the callback host as the resource service and do not make the login page the whole workflow. Example: `cas.whu.edu.cn/authserver/login?...service=uas.metaauth.com/...` means WHU CAS authenticates the user, then returns to the metaauth/UAS resource portal. If the user provides `https://whu.metaersp.cn/personalIndex`, use that portal as the starting resource entry and let it redirect to CAS only when needed.
 
-## Domains to recognize (SJTU)
+## Institution-Specific Domains
 
-Confirm against what actually appears in the user's address bar; correct these if the user's session shows different hosts.
+Confirm against what actually appears in the user's address bar; correct these for each institution instead of assuming a preset is complete.
 
 ```text
-Library home / 聚合服务:     www.lib.sjtu.edu.cn, old.lib.sjtu.edu.cn
-Discovery entry (fixed):     webofscience.clarivate.cn (SJTU mirror), www.webofscience.com, *.webofknowledge.com, *.clarivate.com
-Unified identity (SSO):      jaccount.sjtu.edu.cn          <- the "stop, let user log in" trigger
-SJTU CARSI IdP (Shibboleth): idp.sjtu.edu.cn               <- confirm exact host with the user
-CARSI federation / WAYF:     ds.carsi.edu.cn, *.carsi.edu.cn
+Library home / aggregation:  library.example.edu, resources.example.edu
+Discovery/database entry:    webofscience.com, clarivate.com, cnki.net, sciencedirect.com, provider.example.com
+Unified identity / SSO:      sso.example.edu, cas.example.edu, idp.example.edu
+Federation / WAYF:           ds.carsi.edu.cn, wayf.example.org, shibboleth/openathens hosts
+Proxy / WebVPN:              ezproxy.example.edu, webvpn.example.edu
 ```
 
-Treat `jaccount.sjtu.edu.cn`, `idp.sjtu.edu.cn`, and `*.carsi.edu.cn` as the institutional sign-in stage — the equivalent of a CAS handoff. Do not treat reaching them as a final failure.
+Treat configured institutional login, federation, proxy, and database-login hosts as sign-in stages. Do not treat reaching them as a final failure.
 
 ## Boundaries
 
@@ -91,9 +99,9 @@ Use only the user's legitimate institutional access. Do not bypass paywalls, DRM
 
 Avoid mass downloading. Work in small batches, preferably after the user confirms the paper list. Leave a clear audit trail of what was downloaded, from where, and whether supporting information was found.
 
-Do not ask the user to paste jAccount passwords, CARSI credentials, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers a password, decline and use the handoff-login workflow instead.
+Do not ask the user to paste institutional passwords, database passwords, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers a password, decline and use the handoff-login workflow instead.
 
-Exception for SJTU jAccount saved-login pages: if the user explicitly says that Chrome has already filled the jAccount credentials and authorizes clicking the login/confirm button, the agent may click that button once on the jAccount / CARSI IdP / institutional SSO page without reading, copying, or typing any credential. This exception does not apply to CAPTCHA, QR login, SMS/OTP, publisher bot checks, or any page outside the expected institutional login flow.
+Exception for saved institutional login pages: if the user explicitly says that the browser has already filled credentials and authorizes clicking the visible login/confirm button, the agent may click that button once on the expected institutional SSO / CAS / CARSI / Shibboleth page without reading, copying, or typing any credential. This exception does not apply to CAPTCHA, QR login, SMS/OTP, publisher bot checks, consent/security warnings, or any page outside the expected institutional login flow.
 
 Do not inspect or export cookies, passwords, local storage, browser profiles, or session files. Use the browser's already-authenticated page context only.
 
@@ -101,15 +109,14 @@ Do not inspect or export cookies, passwords, local storage, browser profiles, or
 
 Before attempting downloads, confirm these conditions:
 
-1. Chrome is open on the user's machine.
+1. The browser that holds the user's library/database login state is open on the user's machine.
 2. The school configuration exists and is valid.
    - Run `python3 scripts/configure_school.py show`.
    - If missing, run `python3 scripts/configure_school.py preset "<school name>"` or guide the user through `src/wizard.py`.
-3. The user has personally logged in to their institution/library/CARSI route in Chrome, and can reach the library aggregation service or Web of Science entry.
-   - SJTU common pages: `https://www.lib.sjtu.edu.cn/`, `https://old.lib.sjtu.edu.cn/`, the 学术资源文献聚合访问服务 database list.
-4. Chrome remote debugging is allowed for the current browser instance.
-   - Ask the user to open `chrome://inspect/#remote-debugging`.
-   - They must enable `Allow remote debugging for this browser instance`.
+3. The user has personally logged in to their institution/library route in that same browser, and can reach the library aggregation service, target database, or discovery entry.
+4. The browser-control path can reuse that same logged-in browser profile.
+   - For Chrome CDP, ask the user to open `chrome://inspect/#remote-debugging` and enable remote debugging for the current browser instance.
+   - If CDP attaches to a stale browser, a temporary profile, or a different browser, use a browser-control channel that can reuse the user's active session instead of launching a new profile.
 5. The environment can run Node.js 22+.
    - Try `node --version`.
    - If `node` is not on PATH in Codex Desktop, try `%LOCALAPPDATA%\OpenAI\Codex\bin\node.exe`.
@@ -138,7 +145,7 @@ Recommended limits:
 
 - normal batch: 5-10 papers
 - upper practical batch: 15-20 papers, with pauses and a manifest
-- stop immediately if publisher checks, CAPTCHA, jAccount/CARSI expiry, or unusual download prompts appear
+- stop immediately if publisher checks, CAPTCHA, institutional login expiry, or unusual download prompts appear
 
 Do not turn a broad keyword search into unlimited automatic downloading. Do not download whole journal issues, volumes, or large result sets.
 
@@ -166,7 +173,7 @@ no_authorized_pdf_found
 failed_after_retry
 ```
 
-Use `carsi_waiting_user` only when the browser is visibly at jAccount / CARSI IdP / unified identity authentication. Do not treat this as a final failure.
+Use `carsi_waiting_user` only when the browser is visibly at an institutional SSO / CAS / CARSI-Shibboleth / OpenAthens / database authentication page. Do not treat this as a final failure.
 
 Use `publisher_verification_waiting_user` or `sciencedirect_robot_check` when a publisher page shows "Are you a robot?", CAPTCHA, Cloudflare, bot verification, or another anti-automation challenge. Do not treat this as a final failure, but do not try to solve it automatically.
 
@@ -176,9 +183,9 @@ Use `full_text_html_available` when the library/full-text resolver grants access
 
 Use `library_no_permission` when the library portal, SFX/OpenURL resolver, database, or publisher page clearly says the user's institution has no full-text entitlement for the paper. Tell the user plainly that the current library resources do not have permission for this article. Do not retry direct publisher access as if it were a temporary network problem.
 
-## Start Chrome Control
+## Start Browser Control
 
-Use the web-access CDP proxy when available.
+Use the web-access CDP proxy when it can attach to the same logged-in browser instance the user is using. If the task depends on existing login state and CDP opens a blank/new profile, prefer a browser-control channel that reuses the user's active browser session.
 
 On Windows PowerShell:
 
@@ -207,13 +214,14 @@ If this hangs or fails:
 
 - Ask the user to confirm the remote debugging checkbox.
 - Check `%TEMP%\cdp-proxy.log`.
+- If targets appear but the database/library page is unauthenticated, suspect a stale CDP endpoint, wrong browser, or fresh browser profile before suspecting missing library permission.
 - Do not attempt to read Chrome session files.
 
 ## Fast Batch Path (default for 2+ papers — fast & token-efficient)
 
 For anything beyond a single paper, run `scripts/batch_download.mjs` instead of driving the browser step-by-step from the agent. It executes the whole chain (WoS search → record → DOI → publisher full text → download) inside Node + the CDP proxy, so **search DOMs and PDF bytes never enter the agent context** — only one compact JSON status line per paper comes back. A 10-paper run finishes in ~50s.
 
-The script reads `~/.config/lit-dl/school.json` automatically. When the config contains `discovery.web_of_science_url`, that URL is used as the Web of Science entry; otherwise the SJTU mirror `https://webofscience.clarivate.cn/wos/woscc/basic-search` is used.
+The script reads `~/.config/lit-dl/school.json` automatically. When the config contains `discovery.web_of_science_url`, that URL is used as the Web of Science entry; otherwise the script falls back to its compiled default Web of Science URL.
 
 ```bash
 # by topic (collects N records from Web of Science Core Collection):
@@ -222,12 +230,18 @@ node scripts/batch_download.mjs --topic "rice blast resistance gene" --count 10 
 node scripts/batch_download.mjs --dois "10.1007/s00122-021-03957-1,10.1111/pbi.14066" --out "<project>"
 # by exact open-access title (arXiv fallback, useful for DOI-less papers):
 node scripts/batch_download.mjs --title "Attention Is All You Need" --open-access --out "<project>"
+# by Chinese exact title (default CNKI route):
+node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --out "<project>"
+# by Chinese exact title, PDF only:
+node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --cnki-format pdf --out "<project>"
+# by Chinese exact title with a library-provided CNKI entry:
+node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --cnki-url "https://kns.cnki.net/kns8s/defaultresult/index" --out "<project>"
 # by known PDF URL:
 node scripts/batch_download.mjs --pdf-url "https://arxiv.org/pdf/1706.03762" --title "Attention Is All You Need" --out "<project>"
 # add --si only when the user asked for supporting information
 ```
 
-Output: `{ summary:{total,downloaded,seconds}, results:[{doi,status,file,bytes}] }`. Per-paper `status` follows the **canonical Status Categories list above** (L83-98) — e.g. `downloaded`, `downloaded_with_si`, `carsi_waiting_user`, `publisher_verification_waiting_user`, `sciencedirect_robot_check`, `publisher_blocked_waiting_user`, `no_full_text_link`, `no_authorized_pdf_found`, `pdf_fetch_failed`, `failed_after_retry`, `do_not_auto_retry`. The stderr short tags `[dl]`/`[wos]`/`[doi]` are for readability only and are NOT status codes; JSON `status` always uses the canonical names. The script saves PDFs under `<project>/PDFs/`; pipe its JSON into the manifest. Pass `--legacy-status` to emit the old short codes (`needs_user_login`, `needs_user_verify`, `publisher_blocked`, `no_pdf_link`, `error`) for backward-compatible manifest consumers.
+Output: `{ summary:{total,downloaded,seconds}, results:[{doi,status,file,bytes}] }`. Per-paper `status` follows the **canonical Status Categories list above** (L83-98) — e.g. `downloaded`, `downloaded_with_si`, `carsi_waiting_user`, `publisher_verification_waiting_user`, `sciencedirect_robot_check`, `publisher_blocked_waiting_user`, `no_full_text_link`, `no_authorized_pdf_found`, `pdf_fetch_failed`, `failed_after_retry`, `do_not_auto_retry`. The stderr short tags `[dl]`/`[wos]`/`[doi]`/`[cnki]` are for readability only and are NOT status codes; JSON `status` always uses the canonical names. The script saves PDFs under `<project>/PDFs/`; CNKI CAJ files, when only CAJ is available, are saved under `<project>/CNKI/`; pass `--cnki-format pdf` to require a CNKI PDF link and avoid saving CAJ. Pipe its JSON into the manifest. Pass `--legacy-status` to emit the old short codes (`needs_user_login`, `needs_user_verify`, `publisher_blocked`, `no_pdf_link`, `error`) for backward-compatible manifest consumers.
 
 **Token discipline (applies to all paths):** never `eval` a whole page DOM, search result, or PDF/SI bytes back into the agent context. Keep large data inside Node/`scripts/*.mjs` and surface only compact status. Reserve interactive `/eval` + `cdp_open_url.mjs` for the single-paper route below or for diagnosing one stuck paper after the batch run.
 
@@ -239,9 +253,9 @@ Before using the library route, check for legitimate open-access availability wh
 
 Important distinction: `--topic` is a Web of Science topic search, not an exact-title resolver. For a known exact title, especially conference/arXiv papers without DOI, prefer `--title "<exact title>" --open-access` or `--pdf-url` when the legitimate PDF URL is known. In testing, `--topic "Attention Is All You Need"` matched an unrelated HBR article first, while `--title "Attention Is All You Need" --open-access` correctly downloaded arXiv `1706.03762v7`.
 
-Web of Science hosts to recognize: `webofscience.clarivate.cn` (the SJTU mirror, confirmed live), `www.webofscience.com`, `*.webofknowledge.com`, `*.clarivate.com`. Note: WoS renders records inside **shadow DOM with a virtualized list** — when scraping manually you must pierce shadow roots and scroll to load more rows (the batch script already does this).
+Web of Science hosts to recognize: `webofscience.clarivate.cn`, `www.webofscience.com`, `*.webofknowledge.com`, `*.clarivate.com`. Note: WoS renders records inside **shadow DOM with a virtualized list** — when scraping manually you must pierce shadow roots and scroll to load more rows (the batch script already does this).
 
-1. **Authenticate once**: open Web of Science via the library aggregation / CARSI entry. If Web of Science shows an authentication preference page with "机构 身份验证 (Shibboleth or Open Athens)" and "IP 身份验证", choose institutional authentication and continue. If the page lands on jAccount / CARSI IdP, follow **CARSI Handoff** below (stop and let the user log in, or click the saved-login confirm button once if authorized).
+1. **Authenticate once**: open Web of Science via the library aggregation / institutional entry. If Web of Science or another database shows authentication choices such as institutional login, Shibboleth/OpenAthens/CARSI, CAS/SSO, or IP login, use the route the user normally uses. If credentials, QR, CAPTCHA, SMS/OTP, or unclear consent appears, follow **Institutional Authentication Handoff** below.
 2. Confirm you are on the authenticated Web of Science search page (institutional name visible, search box present).
 3. Search the paper by **DOI** when available, otherwise by **exact title**:
    - Set the search field to `DOI` or `Title`, paste the value, run the search.
@@ -251,7 +265,7 @@ Web of Science hosts to recognize: `webofscience.clarivate.cn` (the SJTU mirror,
    - `Free Full Text` / `Open Access` if present
    - library resolver links: `Find it at`, `SFX`, `OpenURL`, `Full Text Links`, `查看全文`, `Full Text available via`, database/provider names such as Ovid
    - publisher full-text link: `View Full Text`, the publisher name, or `View PDF`
-   - The full-text link inherits the CARSI session, so the publisher should grant access without a second login. If a second jAccount/CARSI handoff appears, complete it once.
+   - The full-text link should inherit the institutional session, so the publisher often grants access without a second login. If a second institutional handoff appears, complete it once.
 6. On the publisher page, find the PDF link (`PDF`, `View PDF`, `Download PDF`, `pdfft`, `/doi/pdf/`) and save it with `scripts/browser_pdf_downloader.mjs`.
 7. If the full-text resolver opens readable HTML full text but no valid PDF is exposed, save the HTML/text, mark `full_text_html_available`, and tell the user plainly: "已获取 HTML 全文，但当前授权路径没有可下载 PDF." Do not mislabel an HTML page as a PDF; if a PDF probe returns HTML, move it to diagnostics and explain that no valid PDF was downloaded.
 8. If the resolver/provider explicitly says the institution has no entitlement, mark `library_no_permission` and tell the user: "当前图书馆资源没有该文献全文权限." Do not hide this behind `failed_after_retry`.
@@ -298,38 +312,38 @@ try_authorized_oa_route
 mark_do_not_auto_retry
 ```
 
-## CARSI / jAccount Handoff and Retry
+## Institutional Authentication Handoff and Retry
 
-Publishers routed through CARSI/Shibboleth — Elsevier/ScienceDirect, Springer Nature, IEEE, Wiley, ACS, Taylor & Francis, Cell Press, and society platforms — will redirect to jAccount / the SJTU CARSI IdP for the first authenticated access. This is expected and is not a reason to ask for the user's password.
+Publishers and databases routed through CAS/SSO, CARSI/Shibboleth, OpenAthens, EZproxy, WebVPN, or IP authorization may redirect to an institutional login or database login page for the first authenticated access. This is expected and is not a reason to ask for the user's password.
 
-When a page reaches jAccount, the CARSI IdP, or a CARSI federation/WAYF selector:
+When a page reaches an institutional login page, federation/WAYF selector, database login page, or IP-login prompt:
 
 1. Stop automated actions on that tab.
 2. Record the paper in `carsi_retry.tsv` with status `carsi_waiting_user`.
-3. Tell the user exactly which tab/page needs attention, for example: "This page is at SJTU jAccount. If Chrome has already filled the account and password, I can click the login/confirm button once with your authorization; otherwise please complete it in Chrome." If a CARSI WAYF/机构选择 page asks which institution, ask the user to pick `Shanghai Jiao Tong University` (or do so if it is an unambiguous, credential-free selection the user authorized).
+3. Tell the user exactly which tab/page needs attention, for example: "This page is at your institution/database login. If the browser has already filled credentials, I can click the visible login/confirm button once with your authorization; otherwise please complete it in the browser." If a federation/WAYF page asks which institution to use, ask the user to pick their institution, or do it only when the choice is unambiguous and credential-free and the user authorized it.
 4. Do not read, store, or request the password, QR result, OTP, SMS code, CAPTCHA, cookie, or local/session storage.
-5. If the user explicitly authorizes clicking because the jAccount credentials are already filled in Chrome, click only the visible jAccount / CARSI IdP login/confirm button once. Do not type into fields or inspect hidden credential values.
+5. If the user explicitly authorizes clicking because credentials are already filled, click only the visible login/confirm/continue button once. Do not type into fields or inspect hidden credential values. For credential-free options such as "IP login", click only when the user authorizes that route or has just completed it manually.
 6. If QR login, SMS/OTP, CAPTCHA, Cloudflare, or publisher bot verification appears, stop and let the user complete it manually.
 7. After the login/confirm step completes, refresh or continue from the same tab.
 8. Re-detect whether the page is now a publisher article page, a PDF viewer, or another institutional handoff.
 9. If resolved, download and verify the PDF/SI, then update the manifest status to `downloaded` or `downloaded_with_si`.
-10. If it loops back to jAccount/CARSI after a completed user login, record `failed_after_retry` with the observed reason and move on.
+10. If it loops back to the same institutional/database login after a completed user login, record `failed_after_retry` with the observed reason and move on.
 
-### Safe jAccount / CARSI Auto-Confirm
+### Safe Institutional Auto-Confirm
 
-The agent may click a jAccount saved-login confirmation button only when all conditions are true:
+The agent may click a saved-login confirmation button only when all conditions are true:
 
 ```text
-1. The page is on an expected institutional domain such as jaccount.sjtu.edu.cn, idp.sjtu.edu.cn, *.carsi.edu.cn, www.lib.sjtu.edu.cn, or old.lib.sjtu.edu.cn.
-2. The user has explicitly authorized this action in the current conversation, for example: "可以点交大 jAccount 登录按钮".
+1. The page is on an expected institutional, library, federation, or database domain for the user's configured route.
+2. The user has explicitly authorized this action in the current conversation, for example: "可以点这个机构登录确认按钮".
 3. The visible action is clearly a login/confirm/continue button, such as 登录, 登 录, 确认登录, 继续登录, Continue, Proceed, or Sign in.
 4. There is no visible CAPTCHA, Cloudflare challenge, QR-only login, SMS/OTP field, push-approval prompt, password reset prompt, consent-to-share-new-data prompt, or account/security warning.
 5. The agent does not read, reveal, copy, store, type, or modify credentials.
 ```
 
-A CARSI WAYF/机构选择 page (choosing `Shanghai Jiao Tong University`) carries no credentials and may be selected when the user has authorized it. If any condition is unclear, pause and ask the user to handle that tab. Do not repeatedly click login; one click is enough to test whether the saved-login state works.
+A federation/WAYF/机构选择 page carries no credentials and may be selected when the institution is unambiguous and the user has authorized it. If any condition is unclear, pause and ask the user to handle that tab. Do not repeatedly click login; one click is enough to test whether the saved-login state works.
 
-Create or update `carsi_retry.tsv` whenever jAccount/CARSI blocks a batch. Use this header:
+Create or update `carsi_retry.tsv` whenever institutional authentication blocks a batch. Use this header:
 
 ```text
 id	project	title	doi	year	venue	publisher	failure_stage	status	source_url	current_url	next_action	notes
@@ -472,17 +486,17 @@ If a page shows publisher bot verification, CAPTCHA, Cloudflare, QR login, SMS/O
 - Record `publisher_verification_waiting_user` in `publisher_verification.tsv`, or `sciencedirect_robot_check` for ScienceDirect.
 - Continue only after the user says the browser step is complete.
 
-If a page shows jAccount, the SJTU CARSI IdP, CARSI WAYF/机构选择, Shibboleth, OpenAthens, or SAML institutional sign-in:
+If a page shows institutional SSO, CAS, CARSI/Shibboleth, OpenAthens, SAML, federation/WAYF/机构选择, database login, or IP-login options:
 
 - Do not ask for or accept credentials in chat.
-- If the user has explicitly authorized it and Chrome has already filled the jAccount fields, click the visible login/confirm button once.
-- Otherwise pause and ask the user to complete the login in Chrome.
+- If the user has explicitly authorized it and the browser has already filled credentials, click the visible login/confirm button once.
+- Otherwise pause and ask the user to complete the login in the browser.
 - Record `carsi_waiting_user` or `carsi_resolved_retry_needed` in `carsi_retry.tsv` as appropriate.
 
 If the aggregation entry shows no full-text link:
 
-- Try the publisher's own `机构登录 / CARSI` route and select `Shanghai Jiao Tong University`.
-- Try the DOI on the publisher page once a CARSI session exists.
+- Try the publisher's own `Institutional login` / `机构登录` / CARSI/Shibboleth/OpenAthens route and select the user's institution when authorized.
+- Try the DOI on the publisher page once an institutional session exists.
 - Check open-access copies only from legitimate sources.
 - Record `no_authorized_pdf_found` rather than seeking unauthorized mirrors.
 
@@ -499,12 +513,12 @@ If `curl` is unavailable:
 
 If the session expires:
 
-- Ask the user to re-authenticate jAccount in Chrome, then reopen the publisher's aggregation/CARSI entry.
+- Ask the user to re-authenticate through their institution/library route in the same browser, then reopen the publisher/database entry.
 
 ## To Confirm With The User (first run)
 
-These few items depend on the live SJTU session and should be confirmed once, then locked into this file:
+These items depend on the user's live institution/library session and should be confirmed once per deployment or institution profile:
 
-1. The exact SJTU CARSI IdP host (`idp.sjtu.edu.cn` assumed — verify in the address bar at login).
-2. The base URL / link pattern of the 学术资源文献聚合访问服务 entries for the publishers the user actually uses.
-3. Whether a CARSI WAYF/机构选择 step appears, and whether the user authorizes auto-selecting `Shanghai Jiao Tong University`.
+1. The exact institutional login, federation, proxy, WebVPN, or database hosts that appear in the address bar.
+2. The base URL / link pattern of the library aggregation or database entries the user actually uses.
+3. Whether a federation/WAYF/机构选择, IP-login, or database-login step appears, and whether the user authorizes selecting the unambiguous institution/login option.

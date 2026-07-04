@@ -10,6 +10,7 @@
 //   node batch_download.mjs --dois 10.x/a,10.y/b --out <dir> [--si]
 //   node batch_download.mjs --title "<exact title>" --out <dir> [--open-access]
 //   node batch_download.mjs --pdf-url "https://..." --title "<title>" --out <dir>
+//   node batch_download.mjs --title "<中文题名>" --out <dir> [--cnki-url <entry>] [--cnki-format pdf|any]
 //   options: [--proxy http://127.0.0.1:3456] [--debug] [--legacy-status]
 //
 // Boundaries: uses only the user's already-authenticated browser session.
@@ -40,6 +41,11 @@ import {
   schoolSummary,
 } from "./lib/school-config.mjs";
 import { filenameForPdfUrl, findArxivByTitle } from "./lib/open-access.mjs";
+import {
+  DEFAULT_CNKI_URL,
+  downloadCnkiTitle,
+  looksChinese,
+} from "./lib/cnki.mjs";
 
 // Core Collection only: journal articles that carry DOIs (avoids Derwent/patent records).
 const WOS = DEFAULT_DISCOVERY_URL;
@@ -52,6 +58,8 @@ function parseArgs(argv) {
     else if (k === "--title") a.title = argv[++i];
     else if (k === "--pdf-url") a.pdfUrl = argv[++i];
     else if (k === "--open-access") a.openAccess = true;
+    else if (k === "--cnki-url") a.cnkiUrl = argv[++i];
+    else if (k === "--cnki-format") a.cnkiFormat = argv[++i];
     else if (k === "--dois") a.dois = argv[++i].split(",").map((s) => s.trim()).filter(Boolean);
     else if (k === "--count") a.count = Number(argv[++i]);
     else if (k === "--out") a.out = argv[++i];
@@ -65,7 +73,19 @@ function parseArgs(argv) {
   if (modes > 1 && !(a.topic && a.title && modes === 2)) {
     throw new Error("--topic, --title, --pdf-url, and --dois are mutually exclusive except --topic with --title");
   }
+  if (a.cnkiFormat && !["pdf", "any"].includes(a.cnkiFormat)) {
+    throw new Error("--cnki-format must be pdf or any");
+  }
   return a;
+}
+
+function cnkiUrlFromConfig(config, argUrl) {
+  return (
+    argUrl ||
+    config?.discovery?.cnki_url ||
+    config?.discovery?.cnki ||
+    DEFAULT_CNKI_URL
+  );
 }
 
 async function handleWosAuthPreference(proxy, target) {
@@ -274,7 +294,8 @@ async function main() {
   fs.mkdirSync(args.out, { recursive: true });
   const schoolConfig = loadSchoolConfig();
   const discoveryUrl = discoveryUrlFromConfig(schoolConfig);
-  process.stderr.write(`[config] ${schoolSummary(schoolConfig)}; discovery=${discoveryUrl}\n`);
+  const cnkiUrl = cnkiUrlFromConfig(schoolConfig, args.cnkiUrl);
+  process.stderr.write(`[config] ${schoolSummary(schoolConfig)}; discovery=${discoveryUrl}; cnki=${cnkiUrl}\n`);
 
   // Fail fast with a friendly message if the CDP proxy isn't running.
   await healthCheck(args.proxy);
@@ -311,6 +332,24 @@ async function main() {
     }
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(JSON.stringify({ summary: { total: 1, downloaded: results.filter((r) => isSuccess(r.status)).length, seconds: Number(secs) }, results }, null, 2));
+    return;
+  }
+
+  if (args.title && looksChinese(args.title) && !args.topic) {
+    process.stderr.write(`[cnki] searching Chinese title: ${args.title}\n`);
+    const r = await downloadCnkiTitle(args.proxy, args.title, args.out, {
+      cnkiUrl,
+      format: args.cnkiFormat || "any",
+      debug: args.debug,
+    }).catch((e) => ({
+      title: args.title,
+      status: STATUS.FAILED_AFTER_RETRY,
+      err: String(e).slice(0, 120),
+      source: "cnki",
+    }));
+    results.push(r);
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    console.log(JSON.stringify({ summary: { total: 1, downloaded: isSuccess(r.status) ? 1 : 0, seconds: Number(secs) }, results }, null, 2));
     return;
   }
 
