@@ -49,6 +49,7 @@ import {
   exactArticleTitleMatch,
   safeArticleTitle,
   shouldUseCleanWosBundle,
+  wosSearchQuery,
 } from "./lib/wos-supporting-information.mjs";
 import {
   DEFAULT_CNKI_URL,
@@ -438,8 +439,9 @@ async function main() {
   let dois = args.dois || [];
 
   if (!dois.length && args.topic) {
-    process.stderr.write(`[wos] searching: ${args.topic}\n`);
-    const { target, urls } = await wosRecordUrls(args.proxy, args.topic, args.count, args.debug, discoveryUrl);
+    const searchQuery = wosSearchQuery(args.topic, args.title || "");
+    process.stderr.write(`[wos] searching: ${searchQuery}\n`);
+    const { target, urls } = await wosRecordUrls(args.proxy, searchQuery, args.count, args.debug, discoveryUrl);
     process.stderr.write(`[wos] ${urls.length} records\n`);
     for (const u of urls) {
       if (dois.length >= args.count) break;

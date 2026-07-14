@@ -47,6 +47,10 @@ export function shouldUseCleanWosBundle(args = {}) {
   return Boolean(args.topic && args.title && args.si);
 }
 
+export function wosSearchQuery(topic, exactTitle = "") {
+  return exactTitle ? `"${String(exactTitle).replace(/"/g, "").trim()}"` : topic;
+}
+
 function filenameFromLink(link, url) {
   const explicit = String(link.download || "").trim();
   if (explicit) return path.basename(explicit);
@@ -63,7 +67,7 @@ export function selectSupportingInformationLinks(links, baseUrl, limit = 30) {
     const rawUrl = link.href || link.dataHref || link.dataUrl || link.dataDownloadUrl || "";
     const label = [link.text, link.ariaLabel, link.title].filter(Boolean).join(" ").trim();
     if (!rawUrl || !SUPPLEMENT_LABEL.test(`${label} ${link.download || ""} ${rawUrl}`)) continue;
-    if (/^(?:javascript:|mailto:|tel:|data:)/i.test(rawUrl)) continue;
+    if (/^#/i.test(link.rawHref || "") || /^(?:#|javascript:|mailto:|tel:|data:)/i.test(rawUrl)) continue;
     let url;
     try {
       url = new URL(rawUrl, baseUrl).href;
@@ -83,18 +87,43 @@ export function selectSupportingInformationLinks(links, baseUrl, limit = 30) {
   return { attachments, pages };
 }
 
-const SCAN_LINKS_SCRIPT = `(()=>JSON.stringify(Array.from(document.querySelectorAll('a[href],button,[role=link],[data-href],[data-url],[data-download-url]')).map(e=>({text:(e.innerText||e.textContent||'').trim().slice(0,240),href:e.href||'',download:e.getAttribute('download')||'',ariaLabel:e.getAttribute('aria-label')||'',title:e.getAttribute('title')||'',dataHref:e.getAttribute('data-href')||'',dataUrl:e.getAttribute('data-url')||'',dataDownloadUrl:e.getAttribute('data-download-url')||''}))))()`;
+const SCAN_LINKS_SCRIPT = `(()=>JSON.stringify(Array.from(document.querySelectorAll('a[href],button,[role=link],[data-href],[data-url],[data-download-url]')).map(e=>({text:(e.innerText||e.textContent||'').trim().slice(0,240),href:e.href||'',rawHref:e.getAttribute('href')||'',download:e.getAttribute('download')||'',ariaLabel:e.getAttribute('aria-label')||'',title:e.getAttribute('title')||'',dataHref:e.getAttribute('data-href')||'',dataUrl:e.getAttribute('data-url')||'',dataDownloadUrl:e.getAttribute('data-download-url')||''}))))()`;
 
 async function scanPage(proxy, tab, url) {
   await navigate(proxy, tab, url);
   await waitForComplete(proxy, tab);
-  await sleep(800);
-  const raw = await evalJs(proxy, tab, SCAN_LINKS_SCRIPT);
-  try {
-    return JSON.parse(raw || "[]");
-  } catch {
-    return [];
+  let links = [];
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await sleep(attempt === 0 ? 800 : 1000);
+    const raw = await evalJs(proxy, tab, SCAN_LINKS_SCRIPT);
+    try {
+      links = JSON.parse(raw || "[]");
+    } catch {
+      links = [];
+    }
+    const found = selectSupportingInformationLinks(links, url);
+    if (found.attachments.length || found.pages.length) break;
   }
+  return links;
+}
+
+export async function fetchAttachmentWithNavigationFallback(
+  proxy,
+  tab,
+  attachment,
+  resolvePath,
+  dependencies = {}
+) {
+  const fetchImpl = dependencies.fetchImpl || ((p, t, url, outPath) => (
+    fetchAnyToFile(p, t, url, outPath, { rejectHtml: true })
+  ));
+  const navigateImpl = dependencies.navigateImpl || navigate;
+  const waitForCompleteImpl = dependencies.waitForCompleteImpl || waitForComplete;
+  let result = await fetchImpl(proxy, tab, attachment.url, resolvePath);
+  if (result.ok || !/(?:failed to fetch|cors)/i.test(result.err || "")) return result;
+  await navigateImpl(proxy, tab, attachment.url);
+  await waitForCompleteImpl(proxy, tab);
+  return fetchImpl(proxy, tab, attachment.url, resolvePath);
 }
 
 function filenameFromDisposition(value = "") {
@@ -149,9 +178,7 @@ export async function downloadWosSupportingInformation({
   dependencies = {},
 }) {
   const scanPageImpl = dependencies.scanPageImpl || scanPage;
-  const fetchAttachmentImpl = dependencies.fetchAttachmentImpl || (async (p, t, attachment, resolvePath) => (
-    fetchAnyToFile(p, t, attachment.url, resolvePath, { rejectHtml: true })
-  ));
+  const fetchAttachmentImpl = dependencies.fetchAttachmentImpl || fetchAttachmentWithNavigationFallback;
 
   let landingLinks;
   try {

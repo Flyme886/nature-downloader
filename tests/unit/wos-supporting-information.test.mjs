@@ -7,8 +7,10 @@ import {
   articleBundleDirectory,
   downloadWosSupportingInformation,
   exactArticleTitleMatch,
+  fetchAttachmentWithNavigationFallback,
   selectSupportingInformationLinks,
   shouldUseCleanWosBundle,
+  wosSearchQuery,
 } from "../../scripts/lib/wos-supporting-information.mjs";
 
 describe("WoS supporting information selection", () => {
@@ -26,6 +28,11 @@ describe("WoS supporting information selection", () => {
     const run = spawnSync(process.execPath, [script, "--topic", "rice", "--si"], { encoding: "utf8" });
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /--title is required with --topic --si/);
+  });
+
+  test("uses a quoted exact-phrase query when a title is supplied", () => {
+    assert.equal(wosSearchQuery("fallback topic", "Exact article title"), '"Exact article title"');
+    assert.equal(wosSearchQuery("rice drought", ""), "rice drought");
   });
 
   test("selects explicit attachments and one-level supplementary pages", () => {
@@ -52,11 +59,32 @@ describe("WoS supporting information selection", () => {
 
   test("recognizes Elsevier, MDPI, and Wiley attachment patterns", () => {
     const links = [
+      { text: "mmc1", href: "https://publisher.test/article#mmc1", rawHref: "#mmc1" },
       { text: "mmc1", href: "/action/downloadSupplement?doi=10.1/x&file=mmc1.mp4" },
       { text: "Supplementary Materials", href: "/article_deploy/html/images/supplementary/sensors-22-02521-s001.pdf" },
       { text: "Data S1", href: "/action/downloadSupplement?doi=10.1111/x&file=pce14065-sup-0001.pdf" },
     ];
     assert.equal(selectSupportingInformationLinks(links, "https://publisher.test/article").attachments.length, 3);
+  });
+
+  test("retries a CORS-blocked attachment after navigating to its origin", async () => {
+    const calls = [];
+    const result = await fetchAttachmentWithNavigationFallback(
+      "proxy",
+      "tab",
+      { url: "https://cdn.publisher.test/mmc1.pdf" },
+      () => "/tmp/mmc1.pdf",
+      {
+        fetchImpl: async () => {
+          calls.push("fetch");
+          return calls.length === 1 ? { ok: false, err: "TypeError: Failed to fetch" } : { ok: true, file: "/tmp/mmc1.pdf" };
+        },
+        navigateImpl: async () => { calls.push("navigate"); },
+        waitForCompleteImpl: async () => { calls.push("wait"); },
+      }
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(calls, ["fetch", "navigate", "wait", "fetch"]);
   });
 });
 
