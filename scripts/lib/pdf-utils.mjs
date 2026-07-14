@@ -26,6 +26,16 @@ export function isPdfHead(bytes) {
   return head === "%PDF-";
 }
 
+export function isHtmlResponse({ contentType = "", head = [] } = {}) {
+  if (/\b(?:text\/html|application\/xhtml\+xml)\b/i.test(contentType)) return true;
+  const prefix = Buffer.from(head || []).toString("utf8").trimStart().toLowerCase();
+  return prefix.startsWith("<!doctype html") || prefix.startsWith("<html") || prefix.startsWith("<head");
+}
+
+export function shouldRejectHtmlResponse(meta, rejectHtml = false) {
+  return Boolean(rejectHtml && isHtmlResponse(meta));
+}
+
 /**
  * Fetch a URL inside the target tab's authenticated context.
  * Returns { ok, status, size, head, contentType, url } or { ok:false, err }.
@@ -47,7 +57,7 @@ export async function fetchToBuffer(
     const b=new Uint8Array(ab);
     if(b.length>${maxBytes}){return JSON.stringify({ok:false,err:'pdf_too_large',size:b.length});}
     window['${varName}']=b;
-    return JSON.stringify({ok:r.ok,status:r.status,size:b.length,head:Array.from(b.slice(0,8)),contentType:r.headers.get('content-type')||'',url:location.href});
+    return JSON.stringify({ok:r.ok,status:r.status,size:b.length,head:Array.from(b.slice(0,64)),contentType:r.headers.get('content-type')||'',contentDisposition:r.headers.get('content-disposition')||'',url:r.url||location.href});
   }catch(e){return JSON.stringify({ok:false,err:String(e).slice(0,200)})}})()`;
   const raw = await evalJs(proxy, target, js, 120000);
   const meta = JSON.parse(raw || "{}");
@@ -72,6 +82,7 @@ export async function fetchToBuffer(
     size: meta.size,
     head: meta.head,
     contentType: meta.contentType,
+    contentDisposition: meta.contentDisposition,
     url: meta.url,
     varName,
   };
@@ -135,17 +146,29 @@ export async function fetchToFile(proxy, target, url, outPath, { onProgress, max
  * Like fetchToFile but accepts any binary (SI can be jpg/xlsx/docx — not PDF).
  * Returns { ok:true, bytes } or { ok:false, err }.
  */
-export async function fetchAnyToFile(proxy, target, url, outPath, { onProgress, maxBytes } = {}) {
+export async function fetchAnyToFile(proxy, target, url, outPath, { onProgress, maxBytes, rejectHtml = false } = {}) {
   const meta = await fetchToBuffer(proxy, target, url, { requirePdf: false, maxBytes });
   if (!meta.ok) return { ok: false, err: meta.err };
+  if (shouldRejectHtmlResponse(meta, rejectHtml)) {
+    await evalJs(proxy, target, `delete window['${meta.varName}']`).catch(() => {});
+    return { ok: false, err: "HTML response rejected" };
+  }
+  const resolvedOutPath = typeof outPath === "function" ? outPath(meta) : outPath;
   const res = await streamToDisk(
     proxy,
     target,
     meta.varName,
     meta.size,
-    outPath,
+    resolvedOutPath,
     DEFAULT_CHUNK,
     onProgress
   );
-  return { ok: true, bytes: res.bytes };
+  return {
+    ok: true,
+    file: res.file,
+    bytes: res.bytes,
+    contentType: meta.contentType,
+    contentDisposition: meta.contentDisposition,
+    finalUrl: meta.url,
+  };
 }

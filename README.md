@@ -131,12 +131,35 @@ node scripts/batch_download.mjs \
 node scripts/batch_download.mjs --dois "10.xxxx/example" --out "./文献自动下载" --si
 ```
 
+通过 WoS 按英文题名下载正文和补充资料时，同时传入精确题名：
+
+```bash
+node scripts/batch_download.mjs \
+  --topic "Exact English Article Title" \
+  --title "Exact English Article Title" \
+  --count 1 \
+  --si \
+  --out "./文献自动下载"
+```
+
+WoS + `--si` 会为每篇文章创建一个干净文件夹，里面只保存正文 PDF 和页面明确标记的补充文件。若没有 SI，正文仍正常交付，并在 JSON 结果中报告 `si.status = not_found`。附件页最多跟进一层；GitHub、Zenodo 等外部仓储链接不作为 SI 文件下载。
+
 输出目录：
 
 ```text
 文献自动下载/
   PDFs/
   SupportingInformation/
+```
+
+WoS + `--si` 的输出改为：
+
+```text
+文献自动下载/
+  Exact English Article Title/
+    Exact English Article Title.pdf
+    原始补充资料文件名.pdf
+    原始数据文件名.xlsx
 ```
 
 脚本会输出 JSON 状态，常见状态包括 `downloaded`、`open_access_downloaded`、`full_text_html_available`、`library_no_permission`、`carsi_waiting_user`、`publisher_verification_waiting_user`、`sciencedirect_robot_check`、`no_authorized_pdf_found`、`failed_after_retry`。当状态是 `full_text_html_available` 时，表示已拿到可读 HTML 全文，但当前授权路径没有有效 PDF，回复用户时必须说清楚；当状态是 `library_no_permission` 时，表示当前图书馆资源没有该文献全文权限，也必须直接说明。

@@ -44,6 +44,13 @@ import {
 } from "./lib/school-config.mjs";
 import { filenameForPdfUrl, findArxivByTitle } from "./lib/open-access.mjs";
 import {
+  articleBundleDirectory,
+  downloadWosSupportingInformation,
+  exactArticleTitleMatch,
+  safeArticleTitle,
+  shouldUseCleanWosBundle,
+} from "./lib/wos-supporting-information.mjs";
+import {
   DEFAULT_CNKI_URL,
   downloadCnkiTitle,
   looksChinese,
@@ -77,6 +84,9 @@ function parseArgs(argv) {
   }
   if (a.cnkiFormat && !["pdf", "any"].includes(a.cnkiFormat)) {
     throw new Error("--cnki-format must be pdf or any");
+  }
+  if (a.topic && a.si && !a.title) {
+    throw new Error("--title is required with --topic --si for exact-title verification");
   }
   return a;
 }
@@ -169,7 +179,7 @@ async function doiFromRecord(proxy, target, recordUrl) {
 }
 
 // --- Download main PDF (and optionally SI) for a DOI via the authenticated browser ---
-async function downloadDoi(proxy, doi, outDir, wantSi, debug) {
+async function downloadDoi(proxy, doi, outDir, wantSi, debug, { cleanBundle = false, bundleTitle = "" } = {}) {
   const tab = (await newTab(proxy, "https://doi.org/" + doi)).targetId;
   try {
     const info = await waitForComplete(proxy, tab);
@@ -215,7 +225,8 @@ async function downloadDoi(proxy, doi, outDir, wantSi, debug) {
         const m=document.querySelector('meta[name=citation_pdf_url]');
         const cand=[]; if(m&&m.content)cand.push(m.content);
         document.querySelectorAll('a').forEach(a=>{const h=a.href||'';if(/\\/pdf|pdfdirect|pdfft|\\.pdf(\\?|$)|\\/doi\\/epdf/i.test(h))cand.push(h);});
-        return JSON.stringify({cand:[...new Set(cand)].slice(0,6),title:document.title||'',url:location.href,body:(document.body.innerText||'').slice(0,160)});
+        const articleTitle=document.querySelector('meta[name=citation_title]')?.content||document.querySelector('meta[property="og:title"]')?.content||document.querySelector('h1')?.innerText||'';
+        return JSON.stringify({cand:[...new Set(cand)].slice(0,6),title:document.title||'',articleTitle,url:location.href,body:(document.body.innerText||'').slice(0,160)});
       })()`
         )) || "{}"
       );
@@ -259,21 +270,47 @@ async function downloadDoi(proxy, doi, outDir, wantSi, debug) {
       return { doi, status: STATUS.NO_AUTHORIZED_PDF_FOUND, url: meta.url };
     }
 
+    if (cleanBundle && bundleTitle && (!meta.articleTitle || !exactArticleTitleMatch(bundleTitle, meta.articleTitle))) {
+      return {
+        doi,
+        title: meta.articleTitle || "",
+        status: STATUS.DO_NOT_AUTO_RETRY,
+        url: meta.url,
+        reason: meta.articleTitle
+          ? `WoS title mismatch: expected "${bundleTitle}"`
+          : `WoS title could not be verified: expected "${bundleTitle}"`,
+      };
+    }
+
     const safe = doi.replace(/[\/:*?"<>|]/g, "_");
+    const articleTitle = bundleTitle || meta.articleTitle || doi;
+    const bundleDir = cleanBundle ? articleBundleDirectory(outDir, articleTitle) : "";
+    const pdfPath = cleanBundle
+      ? path.join(bundleDir, `${safeArticleTitle(articleTitle)}.pdf`)
+      : path.join(outDir, "PDFs", safe + ".pdf");
     for (const pdfUrl of meta.cand) {
-      const got = await fetchToFile(proxy, tab, pdfUrl, path.join(outDir, "PDFs", safe + ".pdf"));
+      const got = await fetchToFile(proxy, tab, pdfUrl, pdfPath);
       if (got.ok) {
         const res = {
           doi,
+          ...(cleanBundle ? { title: articleTitle } : {}),
           status: STATUS.DOWNLOADED,
           file: got.file,
           bytes: got.bytes,
           via: meta.url,
         };
         if (wantSi) {
-          const si = await downloadSi(proxy, tab, meta.url, doi, outDir);
+          const si = cleanBundle
+            ? await downloadWosSupportingInformation({
+                proxy,
+                tab,
+                landingUrl: meta.url,
+                bundleDir,
+                reservedFilenames: [path.basename(pdfPath)],
+              })
+            : await downloadSi(proxy, tab, meta.url, doi, outDir);
           res.si = si;
-          if (si && si.count > 0) res.status = STATUS.DOWNLOADED_WITH_SI;
+          if ((si?.downloaded || si?.count || 0) > 0) res.status = STATUS.DOWNLOADED_WITH_SI;
         }
         return res;
       }
@@ -431,7 +468,10 @@ async function main() {
   dois = [...new Set(dois)].slice(0, args.count);
 
   for (const doi of dois) {
-    const r = await downloadDoi(args.proxy, doi, args.out, args.si, args.debug).catch((e) => {
+    const r = await downloadDoi(args.proxy, doi, args.out, args.si, args.debug, {
+      cleanBundle: shouldUseCleanWosBundle(args),
+      bundleTitle: args.title || "",
+    }).catch((e) => {
       // Distinguish parameter/logic errors (do_not_auto_retry) from
       // network/CDP errors (failed_after_retry).
       const msg = String(e).slice(0, 120);

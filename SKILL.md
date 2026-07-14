@@ -460,6 +460,18 @@ When the user does ask for supporting information, use this method:
    - `mmc1`, `mmc2` (Elsevier/ScienceDirect supplement pattern)
 3. Download every PDF/DOCX/XLSX/video/data file that is clearly a legitimate supplement, using the browser context if needed.
 
+For the WoS batch route, an explicit SI request maps to `--si`. When an exact title is known, pass it as both `--topic` and `--title` with `--count 1`. WoS + `--si` must:
+
+- keep each paper in its own readable-title folder;
+- place only the verified main PDF and clearly labelled SI files in that folder;
+- preserve original attachment names when available;
+- follow a supplementary landing page at most one level deep;
+- exclude external repository links such as GitHub, Zenodo, Figshare, Dryad, and OSF;
+- keep the main PDF and report `si.status = not_found` when no SI exists;
+- report `partial` when some SI files fail without treating the main PDF as failed.
+
+Do not apply the clean per-article folder behavior to CNKI, `--open-access`, bare `--pdf-url`, or direct `--dois` routes.
+
 ACS fallback pattern, only after verifying the DOI and article page:
 
 ```text
