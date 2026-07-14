@@ -7,23 +7,38 @@ metadata:
 
 # Nature Literature Downloader
 
-This skill turns a user's legitimate institutional access into a repeatable process for configuring, finding, downloading, and reading academic full text. It combines a first-run library-resource configuration wizard (`src/`, `data/`, `scripts/configure_school.py`) with browser-based download scripts (`scripts/batch_download.mjs`, `scripts/browser_pdf_downloader.mjs`) that reuse the user's already-authenticated Chrome session.
+This skill provides two lawful download paths: open-access (OA) retrieval for users without paid library resources, and institution-authorized retrieval for users with paid library/database access. It combines OA discovery with a first-run library-resource configuration wizard (`src/`, `data/`, `scripts/configure_school.py`) and browser-based download scripts (`scripts/batch_download.mjs`, `scripts/browser_pdf_downloader.mjs`).
 
 Verified routes are examples, not defaults. Every institution should start from the user's actual library resource URL, because resource portals, CAS callbacks, EZproxy, WebVPN, IP-authenticated database pages, and database detail pages reveal the live authorization path more reliably than a school name.
 
-> **Access model — read this first.** For a new user, do not begin by asking for the school name or by applying a preset. First ask for the library electronic-resource link they actually use. Inspect that URL to classify the route as a resource portal, CAS/SSO login, CARSI/Shibboleth, EZproxy, WebVPN, IP-authorized database page, or publisher/database detail page. School presets are optional enrichment and fallback only.
+> **Access model — read this first.** Before asking for a school name, library URL, login, or configuration, ask whether the user has access to paid library/institutional subscription resources. If yes, continue with the existing library-resource configuration and authorized-download workflow. If no, skip all institutional configuration and login requirements and use the OA-only download path.
 
-> **Main workflow.** First configure and save the user's real library resource entry. Let the user log in through Chrome when the route reaches institutional authentication. Reuse the saved entry plus the current browser login state for later papers. For each paper, try legitimate open-access sources first; if the article is open access, download directly. Otherwise use the library route. If the library route clearly has no permission, tell the user directly instead of treating it as a generic download failure.
+> **Main workflow.** First choose the access branch. With paid library resources, configure and save the user's real library resource entry, let the user authenticate in Chrome, and then continue the existing workflow, including checking legitimate OA sources before using the library route. Without paid library resources, search and download only from legitimate OA sources; do not ask for institutional configuration or login and do not attempt paywall bypasses.
 
-> **Chinese literature default.** When the user provides a Chinese title and no DOI/PDF URL/topic route, use the CNKI route by default. Reuse the user's current Chrome library/CNKI login state, prefer the configured `discovery.cnki_url` entry when present, and stop for the user if CNKI or the institution asks for login, QR, CAPTCHA, SMS/OTP, or any other verification.
+> **Chinese literature default.** On the paid-library branch, when the user provides a Chinese title and no DOI/PDF URL/topic route, use the CNKI route by default. Reuse the user's current Chrome library/CNKI login state and prefer the configured `discovery.cnki_url` entry when present. On the OA-only branch, do not require CNKI or institutional login; search only lawful OA sources. Slider CAPTCHAs and simple robot checks on authorized routes may be attempted via CDP-simulated interactions. Stop for the user only if auto-verification fails or if the page asks for QR login, SMS/OTP, or image-based CAPTCHA.
 
 > **Browser-state principle.** Authorized downloads depend on the exact browser profile where the user is logged in. If a proxy, CDP session, or browser automation tool opens a fresh profile or a different browser with no login state, do not treat the failure as missing library permission. Switch to a control path that reuses the user's active browser session, or ask the user to authenticate in the controlled browser instance.
 
 > **Format principle.** PDF, HTML full text, and database-native formats such as CAJ are different deliverables. If the user asks for PDF only, require a real PDF link or `%PDF` response and report `no_authorized_pdf_found` / `pdf_fetch_failed` when none exists. Do not save CAJ, HTML, or a login page as if it were a PDF.
 
-## First-Run Resource Configuration
+## First-Run Access Choice
 
-For a brand-new user, ask for a library resource URL first:
+For a brand-new user, ask this before any other setup question:
+
+```text
+你是否有可用的付费图书馆/学校/机构订阅资源，可以通过机构账号访问数据库或论文全文？
+```
+
+Branch on the answer:
+
+- **Yes:** Continue with **Paid Library Resource Configuration** below and then follow the existing authorized-download workflow.
+- **No:** Use the **OA-Only Download Path** below. Do not ask for the user's school, library URL, institutional account, or login state.
+
+If the answer is unclear, briefly explain that paid resources include university/library database subscriptions, CARSI/SSO access, EZproxy/WebVPN, or institution-authorized publisher access, then ask the same yes/no question once.
+
+### Paid Library Resource Configuration
+
+Ask for the library resource URL the user actually uses:
 
 ```text
 请发你平时进入图书馆电子资源/数据库的平台链接。
@@ -64,6 +79,22 @@ The downloader reads this config automatically. If `discovery.web_of_science_url
 
 For Chinese literature, the downloader also reads `discovery.cnki_url` when present. If absent, `scripts/batch_download.mjs --title "<中文题名>"` falls back to `https://kns.cnki.net/kns8s/defaultresult/index`.
 
+### OA-Only Download Path
+
+When the user has no paid library resources:
+
+1. Collect a DOI, PMID, exact title, article URL, or a definite paper list.
+2. Search only legitimate OA sources, such as PMC, publisher OA pages, arXiv, and other lawful repositories or clearly open PDF URLs.
+3. For an exact title, prefer:
+
+   ```bash
+   node scripts/batch_download.mjs --title "<exact title>" --open-access --out "<project>"
+   ```
+
+   Use `--pdf-url` when the user supplies a known legitimate OA PDF URL.
+4. Verify the downloaded file and record the source. Mark a successful PDF as `open_access_downloaded`.
+5. If no lawful OA full text or PDF is found, report that clearly and mark `no_authorized_pdf_found`. Do not redirect the user into institutional setup unless they later say they have paid library access.
+
 ## Resource URL Triage
 
 Classify the user-provided URL before choosing an access path:
@@ -95,7 +126,15 @@ Treat configured institutional login, federation, proxy, and database-login host
 
 ## Boundaries
 
-Use only the user's legitimate institutional access. Do not bypass paywalls, DRM, CAPTCHA, Cloudflare, publisher bot checks, or two-factor authentication. If a page asks for CAPTCHA, QR login, SMS/OTP, Cloudflare, publisher bot checks, or a security challenge, stop and ask the user to complete it in Chrome.
+Use only the user's legitimate institutional access. Do not bypass paywalls, DRM, or two-factor authentication.
+
+**Verification-first rule:** When a visible slider, checkbox, robot check, or simple verification control appears in the user's authenticated Chrome session, attempt it in the browser before asking the user to intervene. Keep the attempt bounded (at most two attempts on one tab), verify that the challenge disappeared, and continue from that same tab when successful.
+
+- Slider/drag challenges (including CNKI puzzle sliders): estimate the visible travel distance and simulate a gradual drag.
+- ScienceDirect robot checks, managed Turnstile, and reCAPTCHA checkbox stages: try the visible checkbox once.
+- Simple `Continue`, `Verify`, or equivalent visible controls: click once, then re-check the page state.
+
+**User handoff:** Ask the user only after the bounded attempt fails, or immediately when the page requires secret or identity-bearing input such as an image-selection answer, QR approval, SMS/OTP, passkey, hardware key, or two-factor authentication. Keep the challenged tab open and never ask the user to paste credentials or codes into chat.
 
 Avoid mass downloading. Work in small batches, preferably after the user confirms the paper list. Leave a clear audit trail of what was downloaded, from where, and whether supporting information was found.
 
@@ -107,7 +146,11 @@ Do not inspect or export cookies, passwords, local storage, browser profiles, or
 
 ## Preconditions
 
-Before attempting downloads, confirm these conditions:
+Before attempting downloads, confirm the conditions that apply to the selected access branch.
+
+For the OA-only branch, confirm the target paper identifier/list, output folder, Node.js 22+, and Python 3 when PDF verification needs it. Do not require a library configuration or institutional browser login.
+
+For the paid-library branch, confirm these conditions:
 
 1. The browser that holds the user's library/database login state is open on the user's machine.
 2. The school configuration exists and is valid.
@@ -145,7 +188,7 @@ Recommended limits:
 
 - normal batch: 5-10 papers
 - upper practical batch: 15-20 papers, with pauses and a manifest
-- stop immediately if publisher checks, CAPTCHA, institutional login expiry, or unusual download prompts appear
+- attempt visible verification controls first; stop after at most two failed attempts, on institutional login expiry, or when an unusual/security-sensitive prompt appears
 
 Do not turn a broad keyword search into unlimited automatic downloading. Do not download whole journal issues, volumes, or large result sets.
 
@@ -164,6 +207,8 @@ carsi_resolved_retry_needed
 publisher_verification_waiting_user
 sciencedirect_robot_check
 retry_after_user_verification
+verification_auto_passed
+verification_auto_failed
 do_not_auto_retry
 url_needs_repair
 library_no_permission
@@ -173,9 +218,13 @@ no_authorized_pdf_found
 failed_after_retry
 ```
 
+Use `verification_auto_passed` when an automatic CAPTCHA/slider/robot check was successfully solved by the skill, and the download then proceeded normally.
+
+Use `verification_auto_failed` when auto-verification was attempted but could not pass the challenge. This is a user-handoff status, not a final failure.
+
 Use `carsi_waiting_user` only when the browser is visibly at an institutional SSO / CAS / CARSI-Shibboleth / OpenAthens / database authentication page. Do not treat this as a final failure.
 
-Use `publisher_verification_waiting_user` or `sciencedirect_robot_check` when a publisher page shows "Are you a robot?", CAPTCHA, Cloudflare, bot verification, or another anti-automation challenge. Do not treat this as a final failure, but do not try to solve it automatically.
+Use `publisher_verification_waiting_user` or `sciencedirect_robot_check` when a publisher page shows a verification challenge but no automatic interaction was possible. When a bounded automatic attempt was made and failed, use `verification_auto_failed` instead. None of these is a final download failure.
 
 Use `open_access_downloaded` when a legitimate open-access route such as PMC, the publisher's OA PDF, arXiv, or another lawful open PDF source provides the downloaded PDF without institutional authorization.
 
@@ -285,16 +334,18 @@ Reduce the chance of triggering them by using a conservative access pattern:
 3. Keep a visible audit trail in the manifest; do not open many publisher tabs in parallel.
 4. Wait for each page to settle before looking for `Download PDF`, `View PDF`, or `PDF`.
 5. Reuse the same tab after the user completes a verification step instead of opening repeated new tabs.
-6. Avoid retry loops. One failed automatic attempt is enough before handing the page to the user.
+6. Avoid retry loops. Use one attempt by default and no more than two attempts on the same tab before handing the page to the user.
 
 When a publisher verification page appears:
 
-1. Stop automated actions on that tab.
-2. Record the paper in `publisher_verification.tsv` or the main manifest with status `publisher_verification_waiting_user`; use `sciencedirect_robot_check` for ScienceDirect's "Are you a robot?" page.
-3. Tell the user which paper and tab need manual attention.
-4. Do not click CAPTCHA, Cloudflare, "Are you a robot?", bot-check, or similar challenge controls automatically.
-5. After the user says the verification is complete, continue from the same tab and try the visible article/PDF route once.
-6. If verification immediately reappears, mark `do_not_auto_retry` and move on.
+1. First, **attempt automatic verification** via the built-in anti-bot module (`scripts/lib/anti-bot.mjs`). The module tries: simple click challenges, ScienceDirect robot check, Cloudflare Turnstile, slider CAPTCHA (including CNKI Geetest-style), and reCAPTCHA checkbox.
+2. If auto-verification succeeds, continue the download from the resolved page.
+3. If auto-verification fails:
+   a. Stop automated actions on that tab.
+   b. Record the paper with status `verification_auto_failed`. Use `sciencedirect_robot_check` only when no automatic interaction was possible.
+   c. Tell the user which paper and tab need manual attention.
+   d. After the user says the verification is complete, continue from the same tab and try the visible article/PDF route once.
+   e. If verification immediately reappears, mark `do_not_auto_retry` and move on.
 
 Create or update `publisher_verification.tsv` when publisher checks interrupt a batch. Use this header:
 
@@ -337,7 +388,7 @@ The agent may click a saved-login confirmation button only when all conditions a
 1. The page is on an expected institutional, library, federation, or database domain for the user's configured route.
 2. The user has explicitly authorized this action in the current conversation, for example: "可以点这个机构登录确认按钮".
 3. The visible action is clearly a login/confirm/continue button, such as 登录, 登 录, 确认登录, 继续登录, Continue, Proceed, or Sign in.
-4. There is no visible CAPTCHA, Cloudflare challenge, QR-only login, SMS/OTP field, push-approval prompt, password reset prompt, consent-to-share-new-data prompt, or account/security warning.
+4. There is no visible QR-only login, SMS/OTP field, push-approval prompt, password reset prompt, consent-to-share-new-data prompt, or account/security warning. (Slider CAPTCHAs and simple robot checks are now auto-attemptable — see Boundaries.)
 5. The agent does not read, reveal, copy, store, type, or modify credentials.
 ```
 
@@ -468,9 +519,9 @@ For project work, keep a folder like:
 
 If direct publisher navigation triggers ScienceDirect "Are you a robot?", Cloudflare, CAPTCHA, or another bot challenge:
 
-- Do not bypass it.
-- Do not auto-click the challenge.
-- Record `publisher_verification_waiting_user` or `sciencedirect_robot_check`.
+- First, attempt automatic verification via `scripts/lib/anti-bot.mjs`.
+- If auto-verification succeeds, continue the download normally.
+- If auto-verification fails, record `verification_auto_failed` or `sciencedirect_robot_check`.
 - Ask the user to solve it in Chrome.
 - Then continue once from the same now-open page.
 - If the same challenge immediately reappears, mark `do_not_auto_retry` and move on.

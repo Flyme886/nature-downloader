@@ -11,7 +11,7 @@
 - **中文文献默认知网**：按中文题名下载时，默认优先走用户已登录/已授权的 CNKI/知网页面；可通过学校配置或 `--cnki-url` 指定图书馆提供的知网入口。
 - **开放获取优先**：若文献本身是开放获取或开源期刊文章，直接走合法开放 PDF；若图书馆资源明确无权限，直接告诉用户。
 
-它不绕过付费墙，不使用镜像站，不破解验证码，不读取或导出 cookies、密码、localStorage、session 文件。遇到 jAccount/CARSI、验证码、Cloudflare、短信/OTP、人机验证时，会停下让用户本人在 Chrome 里完成。
+它不绕过付费墙，不使用镜像站，不读取或导出 cookies、密码、localStorage、session 文件。遇到可见滑块、复选框、人机检查或简单验证按钮时，会先在同一个已登录 Chrome 标签页内进行至多两次有限尝试；仅在尝试失败，或遇到图片选择、二维码确认、短信/OTP、Passkey、硬件密钥和双重认证时，才交给用户本人完成。
 
 ## 快速使用
 
@@ -150,7 +150,7 @@ node scripts/batch_download.mjs --dois "10.xxxx/example" --out "./文献自动�
 - 已验证开放获取路径：`--title "Attention Is All You Need" --open-access` 会精确匹配 arXiv 标题并下载 PDF。
 - 工作流策略：开放获取文章直接下载；非开放获取文章走已配置图书馆资源；馆藏无权限时明确告知用户。
 - 可扩展路径：其他学校可通过 `data/schools.yaml` 配置 SSO/CARSI 和 `discovery.web_of_science_url`。
-- 不承诺：无登录态下载、绕过出版社限制、自动处理验证码/OTP/Cloudflare、无限批量下载。
+- 不承诺：无登录态下载、绕过出版社限制、自动处理图片验证码/OTP/复杂 Cloudflare 挑战、无限批量下载；可见滑块、复选框和简单验证控件会先有限尝试。
 - 注意：`--topic` 是 Web of Science 主题检索，不保证精确题名命中；精确题名优先使用 `--title`。
 
 ## 依赖
