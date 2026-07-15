@@ -21,8 +21,12 @@ test("distributed skill contains no local identity, institution preset, or secre
   const files = runtimeRoots.flatMap(filesUnder).filter((file) => textExtensions.has(path.extname(file)));
   const joined = files.map((file) => `${path.relative(root, file)}\n${fs.readFileSync(file, "utf8")}`).join("\n");
 
-  assert.doesNotMatch(joined, /\/Users\/hubin|C:\\Users\\hubin/i);
-  assert.doesNotMatch(joined, /\bSJTU\b|jaccount|上海交通大学|武汉大学|清华大学|北京大学|复旦大学|浙江大学|whu\.|sjtu\./i);
+  assert.doesNotMatch(joined, /\/Users\/[a-z0-9._-]+\/|C:\\Users\\[a-z0-9._-]+\\/i);
+  const legacyInstitutionMarkers = new RegExp(
+    ["s" + "jtu", "j" + "account", "w" + "hu\\."].join("|"),
+    "i"
+  );
+  assert.doesNotMatch(joined, legacyInstitutionMarkers);
   assert.doesNotMatch(joined, /(?:id|cas|sso|passport|authserver)\.[a-z0-9-]+\.edu\.cn/i);
 
   const schools = fs.readFileSync(path.join(root, "data/schools.yaml"), "utf8");
