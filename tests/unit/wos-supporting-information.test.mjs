@@ -1,8 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   articleBundleDirectory,
   downloadWosSupportingInformation,
@@ -12,6 +10,7 @@ import {
   shouldUseCleanWosBundle,
   wosSearchQuery,
 } from "../../scripts/lib/wos-supporting-information.mjs";
+import { parseArgs } from "../../scripts/batch_download.mjs";
 
 describe("WoS supporting information selection", () => {
   test("keeps the clean bundle behavior isolated to WoS plus --si", () => {
@@ -23,11 +22,10 @@ describe("WoS supporting information selection", () => {
     assert.equal(shouldUseCleanWosBundle({ title: "OA title", openAccess: true, si: true }), false);
   });
 
-  test("requires an exact title for the WoS --si CLI route", () => {
-    const script = fileURLToPath(new URL("../../scripts/batch_download.mjs", import.meta.url));
-    const run = spawnSync(process.execPath, [script, "--topic", "rice", "--si"], { encoding: "utf8" });
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /--title is required with --topic --si/);
+  test("applies one explicit SI choice to a WoS topic batch", () => {
+    const args = parseArgs(["node", "batch_download.mjs", "--topic", "rice", "--si"]);
+    assert.equal(args.topic, "rice");
+    assert.equal(args.si, true);
   });
 
   test("uses a quoted exact-phrase query when a title is supplied", () => {

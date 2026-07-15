@@ -184,6 +184,10 @@ describe("isSuccess", () => {
   test("library_no_permission is NOT success", () => {
     assert.equal(isSuccess(STATUS.LIBRARY_NO_PERMISSION), false);
   });
+
+  test("native_fulltext_downloaded is success", () => {
+    assert.equal(isSuccess(STATUS.NATIVE_FULLTEXT_DOWNLOADED), true);
+  });
 });
 
 describe("isPdfHead", () => {
