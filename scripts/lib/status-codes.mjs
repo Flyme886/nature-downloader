@@ -1,4 +1,4 @@
-// Status codes for the SJTU literature downloader.
+// Status codes for nature-downloader.
 //
 // This is the single source of truth for status naming. Both the batch script
 // and the manifest/retry TSVs MUST use these codes. The SKILL.md "Status
@@ -60,7 +60,7 @@ export const STATUS = Object.freeze({
 
 // Hosts that mean "institutional login wall — stop and hand to user".
 const INSTITUTIONAL_HOST_RE =
-  /jaccount\.sjtu|idp\.sjtu|carsi\.edu|\/shibboleth|\/samlsso|\/wayf|\/sso\b/i;
+  /carsi\.edu|\/authserver\/|\/idp\/|\/shibboleth|\/samlsso|\/wayf|\/sso\b/i;
 
 // Publisher anti-bot / verification signals (checked against title + body).
 const ROBOT_CHECK_RE =
@@ -94,7 +94,7 @@ export function classifyWall(url, title, bodyHint = "") {
   const u = (url || "").toLowerCase();
   const s = ((title || "") + " " + (bodyHint || "")).toLowerCase();
 
-  // 1. Institutional login wall (jAccount / CARSI / Shibboleth / SSO).
+  // 1. Institutional login wall (CAS / CARSI / Shibboleth / SSO).
   //    Only the URL host decides this — publisher pages legitimately contain
   //    "Log in" links and must not be misclassified as needing the user.
   if (INSTITUTIONAL_HOST_RE.test(u)) {

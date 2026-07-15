@@ -13,14 +13,14 @@ import {
 import { isHtmlResponse, isPdfHead, shouldRejectHtmlResponse } from "../../scripts/lib/pdf-utils.mjs";
 
 describe("classifyWall", () => {
-  test("jAccount URL -> carsi_waiting_user", () => {
-    const r = classifyWall("https://jaccount.sjtu.edu.cn/login?returl=x", "Login", "");
+  test("generic CAS URL -> carsi_waiting_user", () => {
+    const r = classifyWall("https://login.university.example/authserver/login?service=x", "Login", "");
     assert.equal(r.status, STATUS.CARSI_WAITING_USER);
     assert.match(r.reason, /institutional/);
   });
 
-  test("idp.sjtu URL -> carsi_waiting_user", () => {
-    const r = classifyWall("https://idp.sjtu.edu.cn/idp/profile/SAML2/Redirect/SSO", "", "");
+  test("generic IdP URL -> carsi_waiting_user", () => {
+    const r = classifyWall("https://identity.university.example/idp/profile/SAML2/Redirect/SSO", "", "");
     assert.equal(r.status, STATUS.CARSI_WAITING_USER);
   });
 

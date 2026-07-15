@@ -1,4 +1,4 @@
-// Shared CDP proxy client for the SJTU literature downloader scripts.
+// Shared CDP proxy client for nature-downloader scripts.
 //
 // All functions take the proxy URL as an explicit parameter (fixes the
 // --proxy bug in batch_download.mjs where PROXY was a hard-coded const and

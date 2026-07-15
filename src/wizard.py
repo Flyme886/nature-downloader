@@ -12,9 +12,7 @@
     result = w.handle_step1(user_input)
     # result = {"next": "step2"|"retry"|"done", "prompt": str, "data": dict}
 
-也支持非交互式直接构建：
-    w = Wizard()
-    w.configure_from_preset("上海交通大学")  # 预设学校一键配置
+发行包不包含任何学校预设；机构名称和入口仅由用户在运行时提供。
 """
 
 from __future__ import annotations
@@ -61,7 +59,7 @@ def infer_access_from_url(url: str) -> dict[str, Any]:
             {
                 "entry_type": "resource_portal",
                 "auth_type": "cas",
-                "sso_domain": "cas.whu.edu.cn" if host.startswith("whu.") else host,
+                "sso_domain": host,
                 "institution_hint": host.split(".", 1)[0] if "." in host else None,
                 "notes": "资源聚合门户；先从该入口进入，必要时由门户跳转到统一身份认证。",
             }
@@ -116,7 +114,7 @@ class Wizard:
             "可以是资源门户、数据库列表、Web of Science 入口、某个数据库详情页，"
             "或跳转到统一身份认证的登录链接。\n\n"
             "我会先根据链接判断 CAS/CARSI/EZproxy/WebVPN/聚合门户等授权路径；"
-            "学校预设只作为后续补充和兜底。"
+            "发行包不内置学校名称或认证地址。"
         )
 
     def handle_step1(self, user_input: str) -> dict[str, Any]:
@@ -153,7 +151,7 @@ class Wizard:
                     "确认先使用这组配置吗？\n"
                     "  1. 确认，继续自检\n"
                     "  2. 我想调整数据库清单\n"
-                    "  3. 改用学校名/预设重新配置"
+                    "  3. 改用手动配置"
                 ),
                 "data": {"inferred": inferred},
             }
@@ -224,7 +222,7 @@ class Wizard:
                 "prompt": (
                     "请粘贴贵校的 CARSI 入口 URL。\n"
                     "（可在 https://www.carsi.edu.cn/ 成员机构列表中找到，"
-                    "通常是 https://xxx.edu.cn/idp/shibboleth 形式）\n\n"
+                    "例如 https://login.university.example/idp/shibboleth；请使用本机构实际入口）\n\n"
                     "如果找不到，输入「跳过」留空，后续可手动补充。"
                 ),
             }
@@ -236,8 +234,7 @@ class Wizard:
                 "prompt": (
                     "你选择了图书馆远程访问（EZproxy）方式。\n\n"
                     "Step 3: 请输入贵校统一身份认证域名。\n"
-                    "（通常是 id.xxx.edu.cn / cas.xxx.edu.cn / sso.xxx.edu.cn 形式，"
-                    "例如 id.tsinghua.edu.cn）"
+                    "（例如 login.university.example；请以本机构实际页面为准）"
                 ),
             }
         elif choice == "3":
@@ -249,7 +246,7 @@ class Wizard:
                 "prompt": (
                     "好的，使用 VPN 方式。\n"
                     "请先确保已连接校园 VPN，然后输入贵校统一身份认证域名。\n"
-                    "（通常是 id.xxx.edu.cn / cas.xxx.edu.cn 形式）"
+                    "（例如 login.university.example；请使用本机构实际域名）"
                 ),
             }
         return {"next": "retry", "prompt": "请输入 1、2 或 3："}
@@ -266,7 +263,7 @@ class Wizard:
                 "prompt": (
                     "已跳过 CARSI 入口（后续可补充）。\n\n"
                     "Step 3: 请输入贵校统一身份认证域名。\n"
-                    "（通常是 id.xxx.edu.cn / cas.xxx.edu.cn / sso.xxx.edu.cn 形式）"
+                    "（例如 login.university.example；请使用本机构实际域名）"
                 ),
             }
 
@@ -285,7 +282,7 @@ class Wizard:
             "prompt": (
                 f"CARSI 入口校验通过。\n\n"
                 "Step 3: 请输入贵校统一身份认证域名。\n"
-                "（通常是 id.xxx.edu.cn / cas.xxx.edu.cn / sso.xxx.edu.cn 形式）"
+                "（例如 login.university.example；请使用本机构实际域名）"
             ),
         }
 
@@ -300,7 +297,7 @@ class Wizard:
         if not ok:
             return {
                 "next": "retry",
-                "prompt": f"{msg}\n\n请重新输入 SSO 域名（如 id.xxx.edu.cn）：",
+                "prompt": f"{msg}\n\n请重新输入本机构的 SSO 域名（如 login.university.example）：",
             }
 
         self.data["sso_domain"] = domain.split("://")[-1].split("/")[0]

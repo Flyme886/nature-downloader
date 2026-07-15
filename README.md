@@ -41,12 +41,6 @@ python3 scripts/configure_school.py show
 python3 scripts/configure_school.py health --force
 ```
 
-没有入口链接时可使用学校预设：
-
-```bash
-python3 scripts/configure_school.py preset 上海交通大学
-```
-
 普通配置保存在 `~/.config/lit-dl/school.json`。
 
 ### 出版商 API

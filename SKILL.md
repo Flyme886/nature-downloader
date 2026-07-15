@@ -1,6 +1,6 @@
 ---
 name: nature-downloader
-description: Use this skill whenever the user wants to download Chinese literature through authorized CNKI access, retrieve English OA articles, use Elsevier/Springer Nature/IEEE APIs for non-OA full text, fall back to a logged-in institutional browser when approved, or download supporting information.
+description: Use when a user needs lawful academic full text, CNKI institutional access, English OA retrieval, publisher API access, institutional browser fallback, or supporting information downloads.
 metadata:
   compatibility: Requires Node.js 22+ and Python 3. CNKI, Web Access, and SI routes additionally require the user's authenticated Chrome session and remote debugging. Uses only lawful OA, publisher API, and user-authorized institutional access.
 ---
@@ -52,13 +52,7 @@ python3 scripts/configure_school.py show
 python3 scripts/configure_school.py health --force
 ```
 
-Use school presets only when the user cannot provide a resource URL, or as a fallback after URL inference:
-
-```bash
-python3 scripts/configure_school.py preset "<school name>"
-python3 scripts/configure_school.py show
-python3 scripts/configure_school.py health --force
-```
+The distributed skill contains no school presets. If the user cannot provide a resource URL, ask them to locate their institution's library/database entry instead of guessing a school-specific domain.
 
 The default config path is:
 
@@ -72,7 +66,7 @@ For tests or isolated profiles, set:
 LIT_DL_CONFIG_DIR=/path/to/configdir
 ```
 
-The downloader reads this config automatically. If `discovery.web_of_science_url` is present, `scripts/batch_download.mjs` uses it as the Web of Science entry; otherwise it falls back to `https://webofscience.clarivate.cn/wos/woscc/basic-search`.
+The downloader reads this config automatically. If `discovery.web_of_science_url` is present, `scripts/batch_download.mjs` uses it as the Web of Science entry; otherwise it falls back to `https://www.webofscience.com/wos/woscc/basic-search`.
 
 For Chinese literature, the downloader also reads `discovery.cnki_url` when present. If absent, `scripts/batch_download.mjs --title "<中文题名>"` falls back to `https://kns.cnki.net/kns8s/defaultresult/index`.
 
@@ -121,7 +115,7 @@ metaersp / metaauth / uas        Library resource aggregation portal
 webofscience / sciencedirect     Database or publisher entry; check whether it was reached through a portal
 ```
 
-If the URL is a login page with a `service=` parameter, treat the callback host as the resource service and do not make the login page the whole workflow. Example: `cas.whu.edu.cn/authserver/login?...service=uas.metaauth.com/...` means WHU CAS authenticates the user, then returns to the metaauth/UAS resource portal. If the user provides `https://whu.metaersp.cn/personalIndex`, use that portal as the starting resource entry and let it redirect to CAS only when needed.
+If the URL is a login page with a `service=` parameter, treat the callback host as the resource service and do not make the login page the whole workflow. For example, `https://login.university.example/authserver/login?service=https://resources.university.example/callback` means the identity service returns to the user's resource portal after authentication.
 
 ## Institution-Specific Domains
 
@@ -426,8 +420,8 @@ id	project	title	doi	year	venue	publisher	failure_stage	status	source_url	curren
 Suggested `next_action` values:
 
 ```text
-user_complete_jaccount_in_chrome
-select_sjtu_in_carsi_wayf
+user_complete_institution_login_in_chrome
+select_institution_in_federation_wayf
 retry_same_tab_after_user_confirms
 repair_url_by_doi
 try_aggregation_entry_route
@@ -442,7 +436,7 @@ Use the bundled script when a PDF URL opens in Chrome but direct shell download 
 
 ```powershell
 $node = "$env:LOCALAPPDATA\OpenAI\Codex\bin\node.exe"
-& $node "$env:USERPROFILE\.agents\skills\sjtu-literature-downloader\scripts\browser_pdf_downloader.mjs" `
+& $node "$env:USERPROFILE\.agents\skills\nature-downloader\scripts\browser_pdf_downloader.mjs" `
   --url "https://www.sciencedirect.com/science/article/pii/SXXXXXXXXXXXXXXXX/pdfft" `
   --out "D:\path\paper.pdf"
 ```
@@ -511,7 +505,7 @@ For PDFs:
 
 ```powershell
 $env:PYTHONUTF8='1'
-python -X utf8 "$env:USERPROFILE\.claude\skills\sjtu-literature-downloader\scripts\extract_pdf_text.py" `
+python -X utf8 "$env:USERPROFILE\.claude\skills\nature-downloader\scripts\extract_pdf_text.py" `
   --pdf "D:\path\paper.pdf" `
   --pages 3
 ```

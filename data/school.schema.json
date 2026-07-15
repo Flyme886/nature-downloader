@@ -41,12 +41,12 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["cas", "jaccount", "uis", "ustp", "sso", "custom"],
+          "enum": ["cas", "sso", "custom"],
           "description": "认证类型"
         },
         "sso_domain": {
           "type": "string",
-          "description": "统一身份认证域名，如 jaccount.sjtu.edu.cn"
+          "description": "统一身份认证域名，如 login.university.example"
         },
         "carsi_entry": {
           "type": ["string", "null"],

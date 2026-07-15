@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Batch literature downloader for the SJTU CARSI / Web of Science route.
+// Institution-neutral literature downloader.
 //
 // Runs the whole chain inside Node + the web-access CDP proxy, so large data
 // (search DOMs, PDF bytes) never enters the agent's context. Only compact
@@ -14,7 +14,7 @@
 //   options: [--proxy http://127.0.0.1:3456] [--debug] [--legacy-status]
 //
 // Boundaries: uses only the user's already-authenticated browser session.
-// Stops at jAccount / CARSI pages and never handles credentials. For visible
+// Stops at institutional SSO / CARSI pages and never handles credentials. For visible
 // verification widgets it makes a bounded attempt before reporting a handoff.
 // Main PDF only by default; --si also fetches supplements.
 

@@ -1,4 +1,4 @@
-// PDF fetch + disk-streaming helpers for the SJTU literature downloader.
+// PDF fetch + disk-streaming helpers for nature-downloader.
 //
 // All functions take proxy + target explicitly so they work regardless of
 // which script calls them. Bytes are fetched inside the page's authenticated
@@ -51,7 +51,7 @@ export async function fetchToBuffer(
   { requirePdf = true, maxBytes = DEFAULT_MAX_BYTES } = {}
 ) {
   // Random window var name so concurrent tabs don't clobber each other.
-  const varName = `__sjtuPdf_${Math.random().toString(36).slice(2, 10)}`;
+  const varName = `__litDlBytes_${Math.random().toString(36).slice(2, 10)}`;
   const js = `(async()=>{try{
     const r=await fetch(${JSON.stringify(url)},{credentials:'include'});
     const ab=await r.arrayBuffer();

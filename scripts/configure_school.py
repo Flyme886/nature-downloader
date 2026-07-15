@@ -90,7 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     preset = sub.add_parser("preset", help="Configure from bundled school preset.")
-    preset.add_argument("school", help="School name or alias, for example 上海交通大学 / 交大 / SJTU")
+    preset.add_argument("school", help="Optional user-maintained preset name. The distributed skill contains no institution presets.")
     preset.set_defaults(func=cmd_preset)
 
     url = sub.add_parser("url", help="Configure from a library resource portal or authentication URL.")
