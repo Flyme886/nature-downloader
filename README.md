@@ -4,15 +4,16 @@
   <img src="assets/banner.jpg" alt="nature-downloader — 合法 OA、出版商 API 与机构授权全文下载" width="100%">
 </p>
 
-`nature-downloader` 按文献语言、文章级 OA 状态和出版商自动选择合法下载路线：
+`nature-downloader` 按文献语言、出版商和可用凭据自动选择合法下载路线：
 
 ```text
 确认是否下载 SI
 → 中文文献：只走 CNKI / 知网机构授权
-→ 英文文献：先查文章级 OA
-   ├─ OA：PMC → Unpaywall → 出版商 OA / 合法仓储
-   └─ 非 OA：Elsevier / Springer Nature / IEEE API
-              其他出版商走 Web Access 机构授权
+→ 英文文献
+   ├─ Elsevier / Springer Nature / IEEE 且有可用 Key
+   │  ├─ 出版商 API 成功：结束，不强制判断 OA
+   │  └─ API 失败：PMC → Unpaywall → 出版商 OA / 合法仓储
+   └─ 其他出版商：先查 OA，OA 不可用时走 Web Access 机构授权
 ```
 
 不绕过付费墙、DRM、验证码或双重认证，不读取或导出浏览器 cookie、密码、localStorage 或 session 文件。
@@ -61,6 +62,14 @@ python3 scripts/configure_credentials.py show
 python3 scripts/configure_credentials.py validate elsevier
 python3 scripts/configure_credentials.py delete elsevier
 ```
+
+当用户已经主动在对话中提供出版商 API key 时，agent 应直接使用标准输入安全保存，不要求重新生成，也不在命令参数、回复或 manifest 中回显：
+
+```bash
+python3 scripts/configure_credentials.py set elsevier --stdin
+```
+
+未主动提供时仍优先使用本地隐藏输入。机构密码、OTP、Cookie 和会话令牌不适用此规则。
 
 Elsevier 获得机构 token 时可额外传入 `--insttoken` 或 `--authtoken`。IEEE 普通 Metadata API key 不代表收费全文权限；只有获得 Full-Text Access API 产品后，才配置由 IEEE 提供的 endpoint 模板。秘密保存在 `~/.config/lit-dl/credentials.json`，文件权限为 `0600`，展示时只显示末四位。
 
@@ -128,7 +137,7 @@ node scripts/batch_download.mjs \
 
 ## API 失败与 Web Access 回退
 
-三家 API 返回无 entitlement 或无全文时不会自动切换。结果返回 `api_fallback_confirmation_required`，确认后按出版商重新运行：
+三家 API 返回无 entitlement 或无全文时，会先自动尝试 PMC、Unpaywall、出版商 OA 和合法仓储。只有 API 与 OA 都未取得全文时，才返回 `api_fallback_confirmation_required`；确认后按出版商重新运行：
 
 ```bash
 --api-fallback-web-for elsevier
@@ -137,7 +146,7 @@ node scripts/batch_download.mjs \
 
 全批次统一选择也可使用 `--api-fallback-web` 或 `--no-api-fallback-web`。Web Access 复用用户已登录的 Chrome 机构会话；登录、QR、OTP 和复杂验证仍由用户本人完成。
 
-如果 PMC/Unpaywall 等 OA 检查未能确认文章是 OA 还是非 OA，返回 `oa_resolution_inconclusive`，不会把“未知”误当作非 OA。配置联系邮箱后重试，或由用户显式指定 `--route`。
+如果 PMC/Unpaywall 等 OA 检查无法确认文章状态，manifest 会记录 OA assessment 为 `unknown`，但不会把它误标为非 OA；后续仍可使用机构 Web Access 寻找授权全文。
 
 ## 输出
 

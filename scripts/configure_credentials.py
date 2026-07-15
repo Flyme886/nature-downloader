@@ -7,6 +7,7 @@ import argparse
 import getpass
 import json
 import os
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -50,7 +51,10 @@ def _mask(value: str) -> str:
 
 
 def cmd_set(args: argparse.Namespace) -> int:
-    api_key = args.api_key or os.environ.get("LIT_DL_API_KEY") or getpass.getpass("API key: ")
+    if args.stdin:
+        api_key = sys.stdin.readline().strip()
+    else:
+        api_key = args.api_key or os.environ.get("LIT_DL_API_KEY") or getpass.getpass("API key: ")
     if not api_key:
         raise SystemExit("API key 不能为空")
     values = {"api_key": api_key.strip()}
@@ -129,6 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     set_cmd = sub.add_parser("set")
     set_cmd.add_argument("provider", choices=PROVIDERS)
     set_cmd.add_argument("--api-key", help="Prefer the hidden prompt or LIT_DL_API_KEY over command-line secrets.")
+    set_cmd.add_argument("--stdin", action="store_true", help="Read the API key from stdin without placing it in process arguments or output.")
     set_cmd.add_argument("--insttoken", help="Elsevier institutional token, if issued.")
     set_cmd.add_argument("--authtoken", help="Elsevier authentication token, if issued.")
     set_cmd.add_argument("--fulltext-endpoint", help="IEEE paid Full-Text Access API endpoint template issued for your product; use {doi} as the placeholder.")

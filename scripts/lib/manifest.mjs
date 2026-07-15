@@ -2,9 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 
 const SECRET_KEY_RE = /(?:api[_-]?key|secret|password|cookie|session|authtoken|insttoken|access[_-]?token|authorization)/i;
+const SECRET_QUERY_RE = /([?&](?:api[_-]?key|apikey|secret|password|authtoken|insttoken|access[_-]?token|authorization)=)[^&#\s"']*/gi;
+
+function redactString(value) {
+  return value
+    .replace(SECRET_QUERY_RE, "$1[REDACTED]")
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]");
+}
 
 function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
+  if (typeof value === "string") return redactString(value);
   if (!value || typeof value !== "object") return value;
   return Object.fromEntries(
     Object.entries(value)

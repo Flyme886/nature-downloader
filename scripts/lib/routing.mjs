@@ -16,6 +16,11 @@ export function classifyPublisher({ doi = "", publisher = "", sourceUrl = "" } =
   return "other";
 }
 
+export function hasUsablePublisherCredentials(provider, credentials) {
+  if (!credentials?.api_key) return false;
+  return provider !== "ieee" || Boolean(credentials.fulltext_endpoint);
+}
+
 export function isChineseLiterature({ title = "", language = "", sourceUrl = "", cnki = null } = {}) {
   if (cnki) return true;
   if (sourceUrl && isCnkiUrl(sourceUrl)) return true;
@@ -26,8 +31,11 @@ export function isChineseLiterature({ title = "", language = "", sourceUrl = "",
 export function chooseRoute(article = {}) {
   if (article.routeOverride) return { provider: article.routeOverride, reason: "explicit_override" };
   if (isChineseLiterature(article)) return { provider: "cnki", reason: "chinese_literature" };
-  if (article.isOa === true) return { provider: "open_access", reason: "article_level_oa" };
   const publisher = classifyPublisher(article);
-  if (publisher !== "other") return { provider: publisher, reason: "non_oa_publisher" };
-  return { provider: "web_access", reason: "non_oa_other_publisher" };
+  if (publisher !== "other" && article.hasPublisherCredentials) {
+    return { provider: publisher, reason: "publisher_api_credentials_available" };
+  }
+  if (article.isOa === true) return { provider: "open_access", reason: "article_level_oa" };
+  if (publisher !== "other") return { provider: publisher, reason: "supported_publisher" };
+  return { provider: "web_access", reason: "other_publisher" };
 }

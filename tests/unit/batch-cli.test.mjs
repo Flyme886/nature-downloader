@@ -34,4 +34,15 @@ describe("batch CLI contract", () => {
     assert.deepEqual(args.apiFallbackWebFor, ["elsevier", "ieee"]);
     assert.deepEqual(args.noApiFallbackWebFor, ["springer_nature"]);
   });
+
+  test("accepts a title alongside a known PDF URL", () => {
+    const args = parseArgs([
+      "node", "batch_download.mjs",
+      "--pdf-url", "https://example.org/paper.pdf",
+      "--title", "Example Paper",
+      "--no-si",
+    ]);
+    assert.equal(args.pdfUrl, "https://example.org/paper.pdf");
+    assert.equal(args.title, "Example Paper");
+  });
 });

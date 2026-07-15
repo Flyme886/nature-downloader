@@ -61,7 +61,13 @@ import {
   isCnkiUrl,
   looksChinese,
 } from "./lib/cnki.mjs";
-import { parseSiChoice, chooseRoute, isChineseLiterature } from "./lib/routing.mjs";
+import {
+  classifyPublisher,
+  hasUsablePublisherCredentials,
+  parseSiChoice,
+  chooseRoute,
+  isChineseLiterature,
+} from "./lib/routing.mjs";
 import { fetchCrossrefByDoi, findCrossrefByTitle } from "./lib/metadata.mjs";
 import { downloadOpenAccessArticle } from "./lib/open-access-provider.mjs";
 import { downloadPublisherArticle } from "./lib/publisher-providers.mjs";
@@ -101,9 +107,9 @@ export function parseArgs(argv) {
     else if (k === "--legacy-status") a.legacyStatus = true;
     else throw new Error("unknown arg " + k);
   }
-  const modes = [a.topic, a.title, a.pdfUrl, a.dois?.length].filter(Boolean).length;
-  if (modes > 1 && !(a.topic && a.title && modes === 2)) {
-    throw new Error("--topic, --title, --pdf-url, and --dois are mutually exclusive except --topic with --title");
+  const primaryModes = [a.topic, a.pdfUrl, a.dois?.length].filter(Boolean).length;
+  if (primaryModes > 1 || (a.title && a.dois?.length)) {
+    throw new Error("--topic, --pdf-url, and --dois are mutually exclusive; --title may accompany --topic or --pdf-url");
   }
   if (a.cnkiFormat && !["pdf", "any"].includes(a.cnkiFormat)) {
     throw new Error("--cnki-format must be pdf or any");
@@ -469,6 +475,15 @@ async function downloadArxivTitle(title, args) {
   return { ...downloaded, title: hit.title, arxiv: hit.id, route: "open_access", route_reason: "arxiv_exact_title", si_requested: args.si, ...(args.si ? { si: { status: "not_found" } } : {}) };
 }
 
+function attemptSummary(result, provider) {
+  if (!result) return null;
+  return {
+    provider,
+    status: result.status,
+    ...(result.httpStatus ? { http_status: result.httpStatus } : {}),
+  };
+}
+
 async function routeDoiDownload(doi, args, context) {
   let article;
   try {
@@ -494,44 +509,81 @@ async function routeDoiDownload(doi, args, context) {
     return decorateResult(result, article, route, args.si);
   }
 
+  const publisherProvider = classifyPublisher(article);
+  const publisherCredentials = publisherProvider === "other" ? null : providerCredentials(publisherProvider);
+  const initialRoute = chooseRoute({
+    ...article,
+    routeOverride: args.route,
+    hasPublisherCredentials: hasUsablePublisherCredentials(publisherProvider, publisherCredentials),
+  });
+  const useApiFirst = !args.route && initialRoute.reason === "publisher_api_credentials_available";
+  let apiResult = null;
+  let oaResult = null;
+
+  if (useApiFirst) {
+    apiResult = await downloadPublisherArticle(article, {
+      provider: publisherProvider,
+      credentials: publisherCredentials,
+      outDir: args.out,
+    });
+    if (isSuccess(apiResult.status)) {
+      apiResult.oa_status = "not_checked_api_first";
+      await attachSupportingInformation(apiResult, doi, args, context);
+      return decorateResult(apiResult, article, {
+        provider: initialRoute.provider,
+        reason: initialRoute.reason,
+      }, args.si);
+    }
+  }
+
   if (!args.route || args.route === "open_access") {
     const oa = await downloadOpenAccessArticle(article, { email: context.contactEmail, outDir: args.out });
+    oaResult = oa;
     if (isSuccess(oa.status)) {
+      if (apiResult) oa.api_attempt = attemptSummary(apiResult, publisherProvider);
       await attachSupportingInformation(oa, doi, args, context);
-      return decorateResult(oa, article, { provider: "open_access", reason: "article_level_oa" }, args.si);
+      return decorateResult(oa, article, {
+        provider: "open_access",
+        reason: apiResult ? "publisher_api_failed_oa_fallback" : "article_level_oa",
+      }, args.si);
     }
     if (args.route === "open_access") return decorateResult(oa, article, { provider: "open_access", reason: "explicit_override" }, args.si);
-    if (oa.oaAssessment === "confirmed_oa") {
-      return decorateResult(oa, article, { provider: "open_access", reason: "confirmed_oa_but_fulltext_unavailable" }, args.si);
-    }
-    if (oa.oaAssessment !== "confirmed_closed") {
-      return decorateResult({
-        ...oa,
-        status: STATUS.OA_RESOLUTION_INCONCLUSIVE,
-        next_action: context.contactEmail
-          ? "Retry OA resolution later or use an explicit --route override"
-          : "Configure an OA contact email with configure_credentials.py contact-email, then retry",
-      }, article, { provider: "open_access", reason: "oa_status_unknown" }, args.si);
-    }
   }
 
-  const route = chooseRoute({ ...article, isOa: false, routeOverride: args.route });
+  const route = chooseRoute({
+    ...article,
+    isOa: false,
+    routeOverride: args.route,
+    hasPublisherCredentials: hasUsablePublisherCredentials(publisherProvider, publisherCredentials),
+  });
   if (route.provider === "web_access") {
     const result = await runWebAccess(doi, article, args, context);
-    return decorateResult({ ...result, provider: "web_access", accessMode: "institution_browser" }, article, route, args.si);
+    return decorateResult({
+      ...result,
+      provider: "web_access",
+      accessMode: "institution_browser",
+      ...(oaResult ? { oa_attempt: { status: oaResult.status, assessment: oaResult.oaAssessment || "unknown" } } : {}),
+    }, article, route, args.si);
   }
 
-  const credentials = providerCredentials(route.provider);
-  const apiResult = await downloadPublisherArticle(article, {
-    provider: route.provider,
-    credentials,
-    outDir: args.out,
-  });
+  const credentials = route.provider === publisherProvider ? publisherCredentials : providerCredentials(route.provider);
+  if (!apiResult) {
+    apiResult = await downloadPublisherArticle(article, {
+      provider: route.provider,
+      credentials,
+      outDir: args.out,
+    });
+  }
   if (isSuccess(apiResult.status)) {
     await attachSupportingInformation(apiResult, doi, args, context);
     return decorateResult(apiResult, article, route, args.si);
   }
-  if (!apiResult.fallbackConfirmationRequired) return decorateResult(apiResult, article, route, args.si);
+  const oaAttempt = oaResult
+    ? { status: oaResult.status, assessment: oaResult.oaAssessment || "unknown" }
+    : null;
+  if (!apiResult.fallbackConfirmationRequired) {
+    return decorateResult({ ...apiResult, ...(oaAttempt ? { oa_attempt: oaAttempt } : {}) }, article, route, args.si);
+  }
   const providerFallback = args.apiFallbackWebFor?.includes(route.provider)
     ? true
     : args.noApiFallbackWebFor?.includes(route.provider)
@@ -541,13 +593,21 @@ async function routeDoiDownload(doi, args, context) {
     return decorateResult({
       ...apiResult,
       api_status: apiResult.status,
+      ...(oaAttempt ? { oa_attempt: oaAttempt } : {}),
       status: STATUS.API_FALLBACK_CONFIRMATION_REQUIRED,
-      next_action: `Ask once for ${route.provider}, then re-run with --api-fallback-web-for ${route.provider} or --no-api-fallback-web-for ${route.provider}`,
+      next_action: `Publisher API and OA fallback failed. Ask once for ${route.provider}, then re-run with --api-fallback-web-for ${route.provider} or --no-api-fallback-web-for ${route.provider}`,
     }, article, route, args.si);
   }
-  if (!providerFallback) return decorateResult({ ...apiResult, web_fallback: "declined" }, article, route, args.si);
+  if (!providerFallback) return decorateResult({ ...apiResult, ...(oaAttempt ? { oa_attempt: oaAttempt } : {}), web_fallback: "declined" }, article, route, args.si);
   const web = await runWebAccess(doi, article, args, context);
-  return decorateResult({ ...web, provider: "web_access", accessMode: "institution_browser", api_attempt: { provider: route.provider, status: apiResult.status }, web_fallback: "accepted" }, article, route, args.si);
+  return decorateResult({
+    ...web,
+    provider: "web_access",
+    accessMode: "institution_browser",
+    api_attempt: attemptSummary(apiResult, route.provider),
+    ...(oaAttempt ? { oa_attempt: oaAttempt } : {}),
+    web_fallback: "accepted",
+  }, article, route, args.si);
 }
 
 function outputAndManifest(args, results, t0) {

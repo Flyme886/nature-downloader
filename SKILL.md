@@ -13,11 +13,24 @@ Verified routes are examples, not defaults. Every institution should start from 
 
 > **SI confirmation gate — do this first.** Before downloading any PDF, CAJ, HTML, XML, archive, or attachment, ask whether the user wants Supporting Information. An explicit request for SI counts as yes; an explicit request for正文 only counts as no. Otherwise ask once for the whole batch. Run the downloader with exactly one of `--si` or `--no-si`. Without either flag the script returns `si_confirmation_required` and does not create the output directory.
 
-> **Main workflow.** Normalize the article, then route it. Chinese literature always uses CNKI and never enters OA or publisher routing. English literature checks article-level OA first. Confirmed OA uses PMC/Unpaywall/publisher OA/lawful repositories. Non-OA Elsevier, Springer Nature, and IEEE articles use their publisher APIs; other publishers use the existing Web Access institutional route.
+> **Main workflow.** Normalize the DOI/title and identify language and publisher before routing. Chinese literature always uses CNKI. For English Elsevier, Springer Nature, and IEEE articles with usable provider credentials, try the publisher API first and do not require an OA determination after a successful API download. If that API attempt fails, automatically check legitimate OA sources. Other English publishers check OA first, then use the institutional Web Access route when OA is unavailable.
+
+```text
+规范化 DOI/题名并识别语言、出版商
+├─ 中文文献：直接走 CNKI
+└─ 英文文献
+   ├─ Elsevier / Springer Nature / IEEE，且已配置有效 Key
+   │  ├─ 优先通过出版商 API 下载
+   │  ├─ API 下载成功：结束，不强制判断 OA
+   │  └─ API 下载失败：检查文章级 OA，再走 PMC / Unpaywall / 合法仓储
+   └─ 其他出版商
+      ├─ 检查文章级 OA
+      └─ OA 不可用：走 Web Access 机构授权
+```
 
 > **Chinese literature is CNKI-only.** A Chinese title, `zh` metadata language, explicit CNKI source URL, or `--route cnki` must use CNKI even if another OA copy appears to exist. Reuse the user's current Chrome library/CNKI login state and prefer configured `discovery.cnki_url`. Never export cookies or collect the institutional password.
 
-> **Publisher API fallback.** A valid API key does not guarantee full-text entitlement. If Elsevier, Springer Nature, or IEEE returns no entitlement or no usable full text, return `api_fallback_confirmation_required` and ask once for that publisher whether to use Web Access. Do not switch automatically.
+> **Publisher API fallback.** A valid API key does not guarantee full-text entitlement. When an Elsevier, Springer Nature, or IEEE API attempt returns no entitlement or no usable full text, automatically try legitimate OA sources first. Return `api_fallback_confirmation_required` and ask once whether to use Web Access only after both the publisher API and OA routes fail. Do not switch to institutional Web Access automatically.
 
 > **Browser-state principle.** Authorized downloads depend on the exact browser profile where the user is logged in. If a proxy, CDP session, or browser automation tool opens a fresh profile or a different browser with no login state, do not treat the failure as missing library permission. Switch to a control path that reuses the user's active browser session, or ask the user to authenticate in the controlled browser instance.
 
@@ -31,7 +44,7 @@ For every download request, first establish the paper list and ask:
 是否同时下载这些文献的 Supporting Information（SI，补充材料）？
 ```
 
-Do metadata lookup before this question only when needed to identify the requested papers. Do not download files until the answer is known. Configure a library only when the selected route is CNKI or Web Access. Configure a publisher API only when the selected English non-OA article belongs to that provider.
+Do metadata lookup before this question only when needed to identify the requested papers. Do not download files until the answer is known. Configure a library only when the selected route is CNKI or Web Access. Configure a publisher API only when the selected English article belongs to Elsevier, Springer Nature, or IEEE; an OA determination is not required before trying a configured provider API.
 
 ### Paid Library Resource Configuration
 
@@ -70,21 +83,23 @@ The downloader reads this config automatically. If `discovery.web_of_science_url
 
 For Chinese literature, the downloader also reads `discovery.cnki_url` when present. If absent, `scripts/batch_download.mjs --title "<中文题名>"` falls back to `https://kns.cnki.net/kns8s/defaultresult/index`.
 
-### Open-Access Download Path
+### API-First and Open-Access Fallback
 
-For an English article, resolve article-level OA before publisher routing:
+For an English article, identify its publisher before deciding when to resolve article-level OA:
 
-1. Collect a DOI, PMID, exact title, article URL, or a definite paper list.
-2. Search only legitimate OA sources, such as PMC, publisher OA pages, arXiv, and other lawful repositories or clearly open PDF URLs.
-3. For an exact title, prefer:
+1. Collect a DOI, PMID, exact title, article URL, or a definite paper list, then normalize its metadata and publisher.
+2. If it belongs to Elsevier, Springer Nature, or IEEE and usable provider credentials are configured, try that publisher API first. On success, record `accessMode: publisher_api` and `oa_status: not_checked_api_first`; do not run OA resolution only to label the article.
+3. If the publisher API fails, automatically search legitimate OA sources such as PMC, Unpaywall, publisher OA pages, arXiv, and other lawful repositories or clearly open PDF URLs. Preserve the failed API attempt in the manifest.
+4. For all other English publishers, search those legitimate OA sources before Web Access.
+5. For an exact title or an explicit OA-only request, prefer:
 
    ```bash
    node scripts/batch_download.mjs --title "<exact title>" --open-access --no-si --out "<project>"
    ```
 
    Use `--pdf-url` when the user supplies a known legitimate OA PDF URL.
-4. Verify the downloaded file and record the source. Mark a successful PDF as `open_access_downloaded`.
-5. If no lawful OA full text is found, mark `oa_not_found` and continue to the non-OA publisher router unless `--route open_access` was explicitly requested.
+6. Verify the downloaded file and record the source. Mark a successful PDF as `open_access_downloaded`.
+7. If no lawful OA full text is found, mark `oa_not_found`. For a supported publisher whose API already failed, request confirmation before Web Access. For another publisher, continue to Web Access. If `--route open_access` was explicitly requested, stop after the OA result.
 
 ### Publisher API Credentials
 
@@ -94,13 +109,16 @@ Configure credentials lazily, only when the route first needs them:
 python3 scripts/configure_credentials.py set elsevier
 python3 scripts/configure_credentials.py set springer_nature
 python3 scripts/configure_credentials.py set ieee --fulltext-endpoint 'https://issued-endpoint.example/articles/{doi}'
+python3 scripts/configure_credentials.py set elsevier --stdin
 python3 scripts/configure_credentials.py show
 python3 scripts/configure_credentials.py validate <provider>
 python3 scripts/configure_credentials.py delete <provider>
 python3 scripts/configure_credentials.py contact-email researcher@example.org
 ```
 
-Give the user the official registration link: Elsevier `https://dev.elsevier.com/`, Springer Nature `https://dev.springernature.com/docs/quick-start/api-access/`, or IEEE `https://developer.ieee.org/member/register`. Let the user enter the key through the local hidden prompt; never echo it or place it in a manifest. IEEE Metadata API access is not paid full-text access; require the issued Full-Text Access endpoint/template before treating IEEE as downloadable through the API. Secrets are stored in `~/.config/lit-dl/credentials.json` with mode `0600`.
+Give the user the official registration link: Elsevier `https://dev.elsevier.com/`, Springer Nature `https://dev.springernature.com/docs/quick-start/api-access/`, or IEEE `https://developer.ieee.org/member/register`.
+
+Do not proactively ask the user to paste an API key into chat. If the user voluntarily sends a publisher API key, treat that as authorization to save that exact key: do not reject it, ask them to regenerate it, or repeat it back. Pass it to `configure_credentials.py set <provider> --stdin`, keep it out of command-line arguments, logs, replies, and manifests, then report only the masked confirmation and validation status. The local hidden prompt remains the preferred path when the key has not already been provided. IEEE Metadata API access is not paid full-text access; require the issued Full-Text Access endpoint/template before treating IEEE as downloadable through the API. Secrets are stored in `~/.config/lit-dl/credentials.json` with mode `0600`.
 
 ## Resource URL Triage
 
@@ -143,9 +161,9 @@ Use only the user's legitimate institutional access. Do not bypass paywalls, DRM
 
 **User handoff:** Ask the user only after the bounded attempt fails, or immediately when the page requires secret or identity-bearing input such as an image-selection answer, QR approval, SMS/OTP, passkey, hardware key, or two-factor authentication. Keep the challenged tab open and never ask the user to paste credentials or codes into chat.
 
-Avoid mass downloading. Work in small batches, preferably after the user confirms the paper list. Leave a clear audit trail of what was downloaded, from where, and whether supporting information was found.
+Avoid unbounded or indiscriminate downloading. Process only the definite paper list confirmed by the user, apply provider-friendly pacing, and leave a clear audit trail of what was downloaded, from where, and whether supporting information was found.
 
-Do not ask the user to paste institutional passwords, database passwords, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers a password, decline and use the handoff-login workflow instead.
+Do not ask the user to paste institutional passwords, database passwords, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers one of those identity-bearing secrets, decline and use the handoff-login workflow instead. Publisher API keys follow the separate save-on-receipt rule above.
 
 Exception for saved institutional login pages: if the user explicitly says that the browser has already filled credentials and authorizes clicking the visible login/confirm button, the agent may click that button once on the expected institutional SSO / CAS / CARSI / Shibboleth page without reading, copying, or typing any credential. This exception does not apply to CAPTCHA, QR login, SMS/OTP, publisher bot checks, consent/security warnings, or any page outside the expected institutional login flow.
 
@@ -189,12 +207,11 @@ Codex and other agent setups may instead use `.codex\skills` or `.agents\skills`
 
 ## Batch Scope
 
-Small batches are supported when the user provides a definite DOI/title/PMID list.
+Definite DOI/title/PMID lists are supported without a fixed per-batch paper-count recommendation.
 
-Recommended limits:
+Operational safeguards:
 
-- normal batch: 5-10 papers
-- upper practical batch: 15-20 papers, with pauses and a manifest
+- pace requests appropriately for each provider and maintain the manifest throughout the batch
 - attempt visible verification controls first; stop after at most two failed attempts, on institutional login expiry, or when an unusual/security-sensitive prompt appears
 
 Do not turn a broad keyword search into unlimited automatic downloading. Do not download whole journal issues, volumes, or large result sets.
@@ -244,6 +261,8 @@ Use `carsi_waiting_user` only when the browser is visibly at an institutional SS
 Use `publisher_verification_waiting_user` or `sciencedirect_robot_check` when a publisher page shows a verification challenge but no automatic interaction was possible. When a bounded automatic attempt was made and failed, use `verification_auto_failed` instead. None of these is a final download failure.
 
 Use `open_access_downloaded` when a legitimate open-access route such as PMC, the publisher's OA PDF, arXiv, or another lawful open PDF source provides the downloaded PDF without institutional authorization.
+
+For a successful API-first download, record `oa_status: not_checked_api_first`; this means OA resolution was intentionally skipped, not that the article is non-OA. Use `api_fallback_confirmation_required` only after a supported publisher API attempt and its automatic OA fallback both fail.
 
 Use `full_text_html_available` when the library/full-text resolver grants access to a readable HTML full text but no valid PDF link or `%PDF` response is available. This is a successful full-text access result, not a PDF download. Save the HTML/text if the user asked for the article, and explicitly tell the user that the PDF was not available through the current authorized route.
 
@@ -311,9 +330,9 @@ Output includes `{ summary, manifest, results }`. The script writes `<project>/m
 
 **Token discipline (applies to all paths):** never `eval` a whole page DOM, search result, or PDF/SI bytes back into the agent context. Keep large data inside Node/`scripts/*.mjs` and surface only compact status. Reserve interactive `/eval` + `cdp_open_url.mjs` for the single-paper route below or for diagnosing one stuck paper after the batch run.
 
-## Recommended Web Access Workflow (other publishers and confirmed API fallback)
+## Recommended Web Access Workflow (other publishers and confirmed API-plus-OA fallback)
 
-Use this section only for English non-OA publishers outside Elsevier/Springer Nature/IEEE, or after the user explicitly accepts Web Access fallback for one of those API providers. Start from Web of Science or the configured library portal and reuse the user's authenticated browser session.
+Use this section only after legitimate OA sources are unavailable: directly for English publishers outside Elsevier/Springer Nature/IEEE, or after the user explicitly accepts Web Access fallback when both a supported publisher API and the OA fallback failed. Start from Web of Science or the configured library portal and reuse the user's authenticated browser session.
 
 Before using the library route, check for legitimate open-access availability when the article metadata suggests OA or the user provides an OA/open journal paper. Use PMC, publisher OA links, arXiv, DOI landing pages with clear open PDF access, or a known lawful PDF URL. If an OA PDF is available, download and verify it directly, mark `open_access_downloaded`, and record the OA source in the manifest. Do not require institutional login for an article that is already openly available.
 
@@ -561,14 +580,14 @@ If shell `Invoke-WebRequest` or `curl` returns 403 but the PDF opens in Chrome:
 
 If a page shows publisher bot verification, CAPTCHA, Cloudflare, QR login, SMS/OTP, or another security challenge:
 
-- Do not ask for or accept credentials in chat.
+- Do not ask for or accept institutional credentials in chat. Publisher API keys follow the separate save-on-receipt rule.
 - Pause and ask the user to complete the verification in Chrome.
 - Record `publisher_verification_waiting_user` in `publisher_verification.tsv`, or `sciencedirect_robot_check` for ScienceDirect.
 - Continue only after the user says the browser step is complete.
 
 If a page shows institutional SSO, CAS, CARSI/Shibboleth, OpenAthens, SAML, federation/WAYF/机构选择, database login, or IP-login options:
 
-- Do not ask for or accept credentials in chat.
+- Do not ask for or accept institutional credentials in chat. Publisher API keys follow the separate save-on-receipt rule.
 - If the user has explicitly authorized it and the browser has already filled credentials, click the visible login/confirm button once.
 - Otherwise pause and ask the user to complete the login in the browser.
 - Record `carsi_waiting_user` or `carsi_resolved_retry_needed` in `carsi_retry.tsv` as appropriate.

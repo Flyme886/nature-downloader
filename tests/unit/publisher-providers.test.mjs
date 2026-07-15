@@ -41,15 +41,18 @@ describe("publisher API providers", () => {
 
   test("accepts Springer JATS XML as native full text", async () => {
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "provider-"));
+    const secret = "springer-secret";
     const result = await downloadPublisherArticle({ doi: "10.1007/example", title: "Springer Example" }, {
       provider: "springer_nature",
-      credentials: { api_key: "key" },
+      credentials: { api_key: secret },
       outDir,
       fetchImpl: async () => response(`<?xml version="1.0"?><article article-type="research-article"><body>Text</body></article>`, { contentType: "application/xml" }),
     });
     assert.equal(result.status, "native_fulltext_downloaded");
     assert.equal(result.format, "jats_xml");
     assert.match(result.file, /\.xml$/);
+    assert.doesNotMatch(result.source, new RegExp(secret));
+    assert.doesNotMatch(result.source, /api_key=/i);
   });
 
   test("reports readable publisher HTML with the HTML-specific success status", async () => {

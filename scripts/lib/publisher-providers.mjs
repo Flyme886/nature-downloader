@@ -7,6 +7,16 @@ export const PROVIDER_CONFIG_URLS = Object.freeze(Object.fromEntries(
   Object.entries(PROVIDER_REGISTRY).map(([provider, descriptor]) => [provider, descriptor.config_url])
 ));
 
+const SECRET_QUERY_PARAM_RE = /^(?:api[_-]?key|apikey|secret|password|authtoken|insttoken|access[_-]?token|authorization)$/i;
+
+function safeSourceUrl(value) {
+  const url = new URL(value);
+  for (const key of [...url.searchParams.keys()]) {
+    if (SECRET_QUERY_PARAM_RE.test(key)) url.searchParams.delete(key);
+  }
+  return String(url);
+}
+
 function providerRequest(article, provider, credentials) {
   const doi = encodeURIComponent(article.doi || "");
   if (provider === "elsevier") {
@@ -73,7 +83,12 @@ export async function downloadPublisherArticle(article, {
     return failureResult(provider, classifyProviderFailure({ status: response.status }), { httpStatus: response.status, attempts: maxAttempts });
   }
 
-  const saved = await saveFullTextResponse(response, { outDir, title: article.title, doi: article.doi, source: String(request.url) });
+  const saved = await saveFullTextResponse(response, {
+    outDir,
+    title: article.title,
+    doi: article.doi,
+    source: safeSourceUrl(request.url),
+  });
   if (!saved.ok) {
     return failureResult(provider, STATUS.API_FULLTEXT_UNAVAILABLE, {
       httpStatus: saved.httpStatus,
