@@ -83,6 +83,28 @@ The downloader reads this config automatically. If `discovery.web_of_science_url
 
 For Chinese literature, the downloader also reads `discovery.cnki_url` when present. If absent, `scripts/batch_download.mjs --title "<中文题名>"` falls back to `https://kns.cnki.net/kns8s/defaultresult/index`.
 
+### Fixed Publisher API Onboarding Output
+
+Immediately after the library resource URL has been saved, shown, and passed the health check, output the following Markdown block exactly. Do not replace the URLs with search results, do not shorten the IEEE warning, and do not ask the user to paste API keys into chat.
+
+```markdown
+请按需配置以下出版商，即可实现长期稳定下载
+Elsevier API Key（必配置）
+[https://dev.elsevier.com/apikey/manage](https://dev.elsevier.com/apikey/manage)
+Website URL可以填写：[Yuan1z0825/nature-skills](https://github.com/Yuan1z0825/nature-skills)
+
+Springer Nature Developer Portal（建议配置）
+https://dev.springernature.com/#api
+下滑依次点击**Subscribe now“-“free”**
+
+IEEE Developer Registration（按需）
+[https://developer.ieee.org/member/register](https://developer.ieee.org/member/register)
+
+完成登录/注册及“学校邮箱”验证后，进入 API Management 页面复制 API Key。IEEE 普通 Key 仅用于 Metadata API，全文访问需要单独申请 Full-Text Access。
+```
+
+Stop after displaying this block and wait for the user to finish registration, school-email verification, and copying the relevant API keys. The user performs all password, CAPTCHA, OTP, email-confirmation, consent, and API-key copying steps. Never read API keys from the browser page or ask the user to send them through chat.
+
 ### API-First and Open-Access Fallback
 
 For an English article, identify its publisher before deciding when to resolve article-level OA:
@@ -103,22 +125,19 @@ For an English article, identify its publisher before deciding when to resolve a
 
 ### Publisher API Credentials
 
-Configure credentials lazily, only when the route first needs them:
+After the fixed publisher onboarding block, configure only the providers for which the user has obtained an API key. Let the user enter each key through the local hidden prompt:
 
 ```bash
 python3 scripts/configure_credentials.py set elsevier
 python3 scripts/configure_credentials.py set springer_nature
 python3 scripts/configure_credentials.py set ieee --fulltext-endpoint 'https://issued-endpoint.example/articles/{doi}'
-python3 scripts/configure_credentials.py set elsevier --stdin
 python3 scripts/configure_credentials.py show
 python3 scripts/configure_credentials.py validate <provider>
 python3 scripts/configure_credentials.py delete <provider>
 python3 scripts/configure_credentials.py contact-email researcher@example.org
 ```
 
-Give the user the official registration link: Elsevier `https://dev.elsevier.com/`, Springer Nature `https://dev.springernature.com/docs/quick-start/api-access/`, or IEEE `https://developer.ieee.org/member/register`.
-
-Do not proactively ask the user to paste an API key into chat. If the user voluntarily sends a publisher API key, treat that as authorization to save that exact key: do not reject it, ask them to regenerate it, or repeat it back. Pass it to `configure_credentials.py set <provider> --stdin`, keep it out of command-line arguments, logs, replies, and manifests, then report only the masked confirmation and validation status. The local hidden prompt remains the preferred path when the key has not already been provided. IEEE Metadata API access is not paid full-text access; require the issued Full-Text Access endpoint/template before treating IEEE as downloadable through the API. Secrets are stored in `~/.config/lit-dl/credentials.json` with mode `0600`.
+Use only the registration URLs in the fixed onboarding block above. Let the user enter each key through the local hidden prompt; never echo it or place it in a manifest. IEEE Metadata API access is not paid full-text access; require the issued Full-Text Access endpoint/template before treating IEEE as downloadable through the API. Secrets are stored in `~/.config/lit-dl/credentials.json` with mode `0600`.
 
 ## Resource URL Triage
 
@@ -163,7 +182,7 @@ Use only the user's legitimate institutional access. Do not bypass paywalls, DRM
 
 Avoid unbounded or indiscriminate downloading. Process only the definite paper list confirmed by the user, apply provider-friendly pacing, and leave a clear audit trail of what was downloaded, from where, and whether supporting information was found.
 
-Do not ask the user to paste institutional passwords, database passwords, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers one of those identity-bearing secrets, decline and use the handoff-login workflow instead. Publisher API keys follow the separate save-on-receipt rule above.
+Do not ask the user to paste institutional passwords, database passwords, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers a password, decline and use the handoff-login workflow instead.
 
 Exception for saved institutional login pages: if the user explicitly says that the browser has already filled credentials and authorizes clicking the visible login/confirm button, the agent may click that button once on the expected institutional SSO / CAS / CARSI / Shibboleth page without reading, copying, or typing any credential. This exception does not apply to CAPTCHA, QR login, SMS/OTP, publisher bot checks, consent/security warnings, or any page outside the expected institutional login flow.
 
@@ -580,14 +599,14 @@ If shell `Invoke-WebRequest` or `curl` returns 403 but the PDF opens in Chrome:
 
 If a page shows publisher bot verification, CAPTCHA, Cloudflare, QR login, SMS/OTP, or another security challenge:
 
-- Do not ask for or accept institutional credentials in chat. Publisher API keys follow the separate save-on-receipt rule.
+- Do not ask for or accept credentials in chat.
 - Pause and ask the user to complete the verification in Chrome.
 - Record `publisher_verification_waiting_user` in `publisher_verification.tsv`, or `sciencedirect_robot_check` for ScienceDirect.
 - Continue only after the user says the browser step is complete.
 
 If a page shows institutional SSO, CAS, CARSI/Shibboleth, OpenAthens, SAML, federation/WAYF/机构选择, database login, or IP-login options:
 
-- Do not ask for or accept institutional credentials in chat. Publisher API keys follow the separate save-on-receipt rule.
+- Do not ask for or accept credentials in chat.
 - If the user has explicitly authorized it and the browser has already filled credentials, click the visible login/confirm button once.
 - Otherwise pause and ask the user to complete the login in the browser.
 - Record `carsi_waiting_user` or `carsi_resolved_retry_needed` in `carsi_retry.tsv` as appropriate.
