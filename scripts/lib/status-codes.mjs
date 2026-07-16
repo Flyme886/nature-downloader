@@ -1,4 +1,4 @@
-// Status codes for the SJTU literature downloader.
+// Status codes for nature-downloader.
 //
 // This is the single source of truth for status naming. Both the batch script
 // and the manifest/retry TSVs MUST use these codes. The SKILL.md "Status
@@ -16,6 +16,7 @@ export const STATUS = Object.freeze({
   OPEN_ACCESS_DOWNLOADED: "open_access_downloaded",
   FULL_TEXT_HTML_AVAILABLE: "full_text_html_available",
   AVAILABLE_NOT_DOWNLOADED: "available_not_downloaded",
+  NATIVE_FULLTEXT_DOWNLOADED: "native_fulltext_downloaded",
 
   // user-handoff (not final failure)
   CARSI_WAITING_USER: "carsi_waiting_user",
@@ -23,6 +24,7 @@ export const STATUS = Object.freeze({
   PUBLISHER_VERIFICATION_WAITING_USER: "publisher_verification_waiting_user",
   SCIENCEDIRECT_ROBOT_CHECK: "sciencedirect_robot_check",
   RETRY_AFTER_USER_VERIFICATION: "retry_after_user_verification",
+  API_FALLBACK_CONFIRMATION_REQUIRED: "api_fallback_confirmation_required",
 
   // auto-verification (new — attempted automatic CAPTCHA/slider/robot check solving)
   VERIFICATION_AUTO_PASSED: "verification_auto_passed",
@@ -31,6 +33,15 @@ export const STATUS = Object.freeze({
   // do-not-retry
   DO_NOT_AUTO_RETRY: "do_not_auto_retry",
   URL_NEEDS_REPAIR: "url_needs_repair",
+  SI_CONFIRMATION_REQUIRED: "si_confirmation_required",
+  CREDENTIALS_MISSING: "credentials_missing",
+  CREDENTIALS_INVALID: "credentials_invalid",
+  API_NOT_ENTITLED: "api_not_entitled",
+  API_FULLTEXT_UNAVAILABLE: "api_fulltext_unavailable",
+  OA_NOT_FOUND: "oa_not_found",
+  OA_RESOLUTION_INCONCLUSIVE: "oa_resolution_inconclusive",
+  METADATA_AMBIGUOUS: "metadata_ambiguous",
+  RATE_LIMITED: "rate_limited",
 
   // no access
   LIBRARY_NO_PERMISSION: "library_no_permission",
@@ -49,7 +60,7 @@ export const STATUS = Object.freeze({
 
 // Hosts that mean "institutional login wall — stop and hand to user".
 const INSTITUTIONAL_HOST_RE =
-  /jaccount\.sjtu|idp\.sjtu|carsi\.edu|\/shibboleth|\/samlsso|\/wayf|\/sso\b/i;
+  /carsi\.edu|\/authserver\/|\/idp\/|\/shibboleth|\/samlsso|\/wayf|\/sso\b/i;
 
 // Publisher anti-bot / verification signals (checked against title + body).
 const ROBOT_CHECK_RE =
@@ -83,7 +94,7 @@ export function classifyWall(url, title, bodyHint = "") {
   const u = (url || "").toLowerCase();
   const s = ((title || "") + " " + (bodyHint || "")).toLowerCase();
 
-  // 1. Institutional login wall (jAccount / CARSI / Shibboleth / SSO).
+  // 1. Institutional login wall (CAS / CARSI / Shibboleth / SSO).
   //    Only the URL host decides this — publisher pages legitimately contain
   //    "Log in" links and must not be misclassified as needing the user.
   if (INSTITUTIONAL_HOST_RE.test(u)) {
@@ -144,6 +155,7 @@ export function isUserHandoff(status) {
     status === STATUS.SCIENCEDIRECT_ROBOT_CHECK ||
     status === STATUS.RETRY_AFTER_USER_VERIFICATION ||
     status === STATUS.VERIFICATION_AUTO_FAILED
+    || status === STATUS.API_FALLBACK_CONFIRMATION_REQUIRED
   );
 }
 
@@ -156,5 +168,6 @@ export function isSuccess(status) {
     status === STATUS.DOWNLOADED_WITH_SI ||
     status === STATUS.OPEN_ACCESS_DOWNLOADED ||
     status === STATUS.FULL_TEXT_HTML_AVAILABLE
+    || status === STATUS.NATIVE_FULLTEXT_DOWNLOADED
   );
 }

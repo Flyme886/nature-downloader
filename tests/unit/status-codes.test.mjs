@@ -10,17 +10,17 @@ import {
   isUserHandoff,
   isSuccess,
 } from "../../scripts/lib/status-codes.mjs";
-import { isPdfHead } from "../../scripts/lib/pdf-utils.mjs";
+import { isHtmlResponse, isPdfHead, shouldRejectHtmlResponse } from "../../scripts/lib/pdf-utils.mjs";
 
 describe("classifyWall", () => {
-  test("jAccount URL -> carsi_waiting_user", () => {
-    const r = classifyWall("https://jaccount.sjtu.edu.cn/login?returl=x", "Login", "");
+  test("generic CAS URL -> carsi_waiting_user", () => {
+    const r = classifyWall("https://login.university.example/authserver/login?service=x", "Login", "");
     assert.equal(r.status, STATUS.CARSI_WAITING_USER);
     assert.match(r.reason, /institutional/);
   });
 
-  test("idp.sjtu URL -> carsi_waiting_user", () => {
-    const r = classifyWall("https://idp.sjtu.edu.cn/idp/profile/SAML2/Redirect/SSO", "", "");
+  test("generic IdP URL -> carsi_waiting_user", () => {
+    const r = classifyWall("https://identity.university.example/idp/profile/SAML2/Redirect/SSO", "", "");
     assert.equal(r.status, STATUS.CARSI_WAITING_USER);
   });
 
@@ -184,6 +184,10 @@ describe("isSuccess", () => {
   test("library_no_permission is NOT success", () => {
     assert.equal(isSuccess(STATUS.LIBRARY_NO_PERMISSION), false);
   });
+
+  test("native_fulltext_downloaded is success", () => {
+    assert.equal(isSuccess(STATUS.NATIVE_FULLTEXT_DOWNLOADED), true);
+  });
 });
 
 describe("isPdfHead", () => {
@@ -214,5 +218,23 @@ describe("isPdfHead", () => {
   test("Buffer works too", () => {
     const buf = Buffer.from("%PDF-1.5");
     assert.equal(isPdfHead(buf), true);
+  });
+});
+
+describe("isHtmlResponse", () => {
+  test("rejects HTML login pages returned as attachments", () => {
+    assert.equal(isHtmlResponse({ contentType: "text/html", head: [] }), true);
+    assert.equal(isHtmlResponse({ contentType: "application/octet-stream", head: Array.from(Buffer.from("<!doctype html><title>Login")) }), true);
+  });
+
+  test("accepts expected supplement file types", () => {
+    assert.equal(isHtmlResponse({ contentType: "application/pdf", head: Array.from(Buffer.from("%PDF-")) }), false);
+    assert.equal(isHtmlResponse({ contentType: "application/zip", head: [80, 75, 3, 4] }), false);
+  });
+
+  test("keeps HTML rejection opt-in so unrelated download routes are unchanged", () => {
+    const html = { contentType: "text/html", head: [] };
+    assert.equal(shouldRejectHtmlResponse(html), false);
+    assert.equal(shouldRejectHtmlResponse(html, true), true);
   });
 });

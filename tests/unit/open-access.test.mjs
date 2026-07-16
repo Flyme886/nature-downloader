@@ -6,6 +6,9 @@ import {
   filenameForPdfUrl,
   normalizeArxivId,
   parseArxivAtom,
+  parsePmcOaXml,
+  parseUnpaywallRecord,
+  rankOaCandidates,
 } from "../../scripts/lib/open-access.mjs";
 
 describe("open access helpers", () => {
@@ -54,5 +57,18 @@ describe("open access helpers", () => {
       filenameForPdfUrl("https://example.org/papers/a/b/c.pdf"),
       "c.pdf"
     );
+  });
+
+  test("parses and ranks PMC before Unpaywall OA candidates", () => {
+    const pmc = parsePmcOaXml(`<OA><records><record id="PMC123"><link format="pdf" href="ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/a.pdf" /></record></records></OA>`);
+    const unpaywall = parseUnpaywallRecord({
+      is_oa: true,
+      best_oa_location: { url_for_pdf: "https://repo.example/a.pdf", host_type: "repository", version: "acceptedVersion", license: "cc-by" },
+      oa_locations: [],
+    });
+    const ranked = rankOaCandidates([...unpaywall, ...pmc]);
+    assert.equal(ranked[0].source, "pmc");
+    assert.equal(ranked[1].source, "repository");
+    assert.equal(ranked[1].version, "acceptedVersion");
   });
 });

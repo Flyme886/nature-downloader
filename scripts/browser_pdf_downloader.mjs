@@ -88,14 +88,14 @@ async function main() {
       const r = await fetch(${fetchTarget}, { credentials: "include" });
       const ct = r.headers.get("content-type") || "";
       const ab = await r.arrayBuffer();
-      window.__sjtuLiteratureDownloaderBytes = new Uint8Array(ab);
+      window.__natureDownloaderBytes = new Uint8Array(ab);
       return {
         ok: r.ok,
         status: r.status,
         contentType: ct,
-        size: window.__sjtuLiteratureDownloaderBytes.length,
+        size: window.__natureDownloaderBytes.length,
         url: location.href,
-        head: Array.from(window.__sjtuLiteratureDownloaderBytes.slice(0, 8))
+        head: Array.from(window.__natureDownloaderBytes.slice(0, 8))
       };
     }
   )()`;
@@ -109,7 +109,7 @@ async function main() {
   const headBytes = Buffer.from(meta.head || []);
   if (!args.allowNonPdf && !isPdfHead(headBytes)) {
     // Clean up the window var before erroring out.
-    await proxyEval(args.proxy, target, `delete window.__sjtuLiteratureDownloaderBytes`, 10000).catch(() => {});
+    await proxyEval(args.proxy, target, `delete window.__natureDownloaderBytes`, 10000).catch(() => {});
     throw new Error(
       `Downloaded content is not a PDF. content-type=${meta.contentType}, head=${JSON.stringify(meta.head)}. ` +
         `If this is expected, rerun with --allow-non-pdf.`
@@ -124,7 +124,7 @@ async function main() {
       const end = Math.min(start + args.chunkSize, size);
       const chunkJs = `(
         () => {
-          const bytes = window.__sjtuLiteratureDownloaderBytes.slice(${start}, ${end});
+          const bytes = window.__natureDownloaderBytes.slice(${start}, ${end});
           let bin = "";
           for (let i = 0; i < bytes.length; i += 0x8000) {
             bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
@@ -141,7 +141,7 @@ async function main() {
     });
   } finally {
     // Always clean up the window var.
-    await proxyEval(args.proxy, target, `delete window.__sjtuLiteratureDownloaderBytes`, 10000).catch(() => {});
+    await proxyEval(args.proxy, target, `delete window.__natureDownloaderBytes`, 10000).catch(() => {});
   }
 
   const saved = fs.readFileSync(args.out);

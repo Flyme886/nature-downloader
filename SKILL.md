@@ -1,40 +1,50 @@
 ---
 name: nature-downloader
-description: Use this skill whenever the user wants to configure school/library access, reuse a logged-in Chrome institutional session, search library databases, download legitimate open-access or institution-authorized academic full text/PDFs, handle missing library permission, organize papers, or read PDFs and supporting information.
+description: Use when a user needs lawful academic full text, CNKI institutional access, English OA retrieval, publisher API access, institutional browser fallback, or supporting information downloads.
 metadata:
-  compatibility: Requires a local Chrome session logged in by the user, Chrome remote debugging permission, Python 3 for configuration, and Node.js 22+ or a bundled Node runtime for download scripts. Uses only user-authorized access. Claude Code may need installation under .claude/skills.
+  compatibility: Requires Node.js 22+ and Python 3. CNKI, Web Access, and SI routes additionally require the user's authenticated Chrome session and remote debugging. Uses only lawful OA, publisher API, and user-authorized institutional access.
 ---
 
 # Nature Literature Downloader
 
-This skill provides two lawful download paths: open-access (OA) retrieval for users without paid library resources, and institution-authorized retrieval for users with paid library/database access. It combines OA discovery with a first-run library-resource configuration wizard (`src/`, `data/`, `scripts/configure_school.py`) and browser-based download scripts (`scripts/batch_download.mjs`, `scripts/browser_pdf_downloader.mjs`).
+This skill routes literature through lawful open-access, publisher-API, CNKI institutional, and browser-based institutional providers. `scripts/batch_download.mjs` is the orchestration entry point; school configuration, publisher credentials, metadata/OA resolution, provider downloads, content validation, and manifests are separate modules.
 
 Verified routes are examples, not defaults. Every institution should start from the user's actual library resource URL, because resource portals, CAS callbacks, EZproxy, WebVPN, IP-authenticated database pages, and database detail pages reveal the live authorization path more reliably than a school name.
 
-> **Access model — read this first.** Before asking for a school name, library URL, login, or configuration, ask whether the user has access to paid library/institutional subscription resources. If yes, continue with the existing library-resource configuration and authorized-download workflow. If no, skip all institutional configuration and login requirements and use the OA-only download path.
+> **SI confirmation gate — do this first.** Before downloading any PDF, CAJ, HTML, XML, archive, or attachment, ask whether the user wants Supporting Information. An explicit request for SI counts as yes; an explicit request for正文 only counts as no. Otherwise ask once for the whole batch. Run the downloader with exactly one of `--si` or `--no-si`. Without either flag the script returns `si_confirmation_required` and does not create the output directory.
 
-> **Main workflow.** First choose the access branch. With paid library resources, configure and save the user's real library resource entry, let the user authenticate in Chrome, and then continue the existing workflow, including checking legitimate OA sources before using the library route. Without paid library resources, search and download only from legitimate OA sources; do not ask for institutional configuration or login and do not attempt paywall bypasses.
+> **Main workflow.** Normalize the DOI/title and identify language and publisher before routing. Chinese literature always uses CNKI. For English Elsevier, Springer Nature, and IEEE articles with usable provider credentials, try the publisher API first and do not require an OA determination after a successful API download. If that API attempt fails, automatically check legitimate OA sources. Other English publishers check OA first, then use the institutional Web Access route when OA is unavailable.
 
-> **Chinese literature default.** On the paid-library branch, when the user provides a Chinese title and no DOI/PDF URL/topic route, use the CNKI route by default. Reuse the user's current Chrome library/CNKI login state and prefer the configured `discovery.cnki_url` entry when present. On the OA-only branch, do not require CNKI or institutional login; search only lawful OA sources. Slider CAPTCHAs and simple robot checks on authorized routes may be attempted via CDP-simulated interactions. Stop for the user only if auto-verification fails or if the page asks for QR login, SMS/OTP, or image-based CAPTCHA.
+```text
+规范化 DOI/题名并识别语言、出版商
+├─ 中文文献：直接走 CNKI
+└─ 英文文献
+   ├─ Elsevier / Springer Nature / IEEE，且已配置有效 Key
+   │  ├─ 优先通过出版商 API 下载
+   │  ├─ API 下载成功：结束，不强制判断 OA
+   │  └─ API 下载失败：检查文章级 OA，再走 PMC / Unpaywall / 合法仓储
+   └─ 其他出版商
+      ├─ 检查文章级 OA
+      └─ OA 不可用：走 Web Access 机构授权
+```
+
+> **Chinese literature is CNKI-only.** A Chinese title, `zh` metadata language, explicit CNKI source URL, or `--route cnki` must use CNKI even if another OA copy appears to exist. Reuse the user's current Chrome library/CNKI login state and prefer configured `discovery.cnki_url`. Never export cookies or collect the institutional password.
+
+> **Publisher API fallback.** A valid API key does not guarantee full-text entitlement. When an Elsevier, Springer Nature, or IEEE API attempt returns no entitlement or no usable full text, automatically try legitimate OA sources first. Return `api_fallback_confirmation_required` and ask once whether to use Web Access only after both the publisher API and OA routes fail. Do not switch to institutional Web Access automatically.
 
 > **Browser-state principle.** Authorized downloads depend on the exact browser profile where the user is logged in. If a proxy, CDP session, or browser automation tool opens a fresh profile or a different browser with no login state, do not treat the failure as missing library permission. Switch to a control path that reuses the user's active browser session, or ask the user to authenticate in the controlled browser instance.
 
 > **Format principle.** PDF, HTML full text, and database-native formats such as CAJ are different deliverables. If the user asks for PDF only, require a real PDF link or `%PDF` response and report `no_authorized_pdf_found` / `pdf_fetch_failed` when none exists. Do not save CAJ, HTML, or a login page as if it were a PDF.
 
-## First-Run Access Choice
+## Download Intake and First-Run Configuration
 
-For a brand-new user, ask this before any other setup question:
+For every download request, first establish the paper list and ask:
 
 ```text
-你是否有可用的付费图书馆/学校/机构订阅资源，可以通过机构账号访问数据库或论文全文？
+是否同时下载这些文献的 Supporting Information（SI，补充材料）？
 ```
 
-Branch on the answer:
-
-- **Yes:** Continue with **Paid Library Resource Configuration** below and then follow the existing authorized-download workflow.
-- **No:** Use the **OA-Only Download Path** below. Do not ask for the user's school, library URL, institutional account, or login state.
-
-If the answer is unclear, briefly explain that paid resources include university/library database subscriptions, CARSI/SSO access, EZproxy/WebVPN, or institution-authorized publisher access, then ask the same yes/no question once.
+Do metadata lookup before this question only when needed to identify the requested papers. Do not download files until the answer is known. Configure a library only when the selected route is CNKI or Web Access. Configure a publisher API only when the selected English article belongs to Elsevier, Springer Nature, or IEEE; an OA determination is not required before trying a configured provider API.
 
 ### Paid Library Resource Configuration
 
@@ -55,13 +65,7 @@ python3 scripts/configure_school.py show
 python3 scripts/configure_school.py health --force
 ```
 
-Use school presets only when the user cannot provide a resource URL, or as a fallback after URL inference:
-
-```bash
-python3 scripts/configure_school.py preset "<school name>"
-python3 scripts/configure_school.py show
-python3 scripts/configure_school.py health --force
-```
+The distributed skill contains no school presets. If the user cannot provide a resource URL, ask them to locate their institution's library/database entry instead of guessing a school-specific domain.
 
 The default config path is:
 
@@ -75,25 +79,46 @@ For tests or isolated profiles, set:
 LIT_DL_CONFIG_DIR=/path/to/configdir
 ```
 
-The downloader reads this config automatically. If `discovery.web_of_science_url` is present, `scripts/batch_download.mjs` uses it as the Web of Science entry; otherwise it falls back to `https://webofscience.clarivate.cn/wos/woscc/basic-search`.
+The downloader reads this config automatically. If `discovery.web_of_science_url` is present, `scripts/batch_download.mjs` uses it as the Web of Science entry; otherwise it falls back to `https://www.webofscience.com/wos/woscc/basic-search`.
 
 For Chinese literature, the downloader also reads `discovery.cnki_url` when present. If absent, `scripts/batch_download.mjs --title "<中文题名>"` falls back to `https://kns.cnki.net/kns8s/defaultresult/index`.
 
-### OA-Only Download Path
+### API-First and Open-Access Fallback
 
-When the user has no paid library resources:
+For an English article, identify its publisher before deciding when to resolve article-level OA:
 
-1. Collect a DOI, PMID, exact title, article URL, or a definite paper list.
-2. Search only legitimate OA sources, such as PMC, publisher OA pages, arXiv, and other lawful repositories or clearly open PDF URLs.
-3. For an exact title, prefer:
+1. Collect a DOI, PMID, exact title, article URL, or a definite paper list, then normalize its metadata and publisher.
+2. If it belongs to Elsevier, Springer Nature, or IEEE and usable provider credentials are configured, try that publisher API first. On success, record `accessMode: publisher_api` and `oa_status: not_checked_api_first`; do not run OA resolution only to label the article.
+3. If the publisher API fails, automatically search legitimate OA sources such as PMC, Unpaywall, publisher OA pages, arXiv, and other lawful repositories or clearly open PDF URLs. Preserve the failed API attempt in the manifest.
+4. For all other English publishers, search those legitimate OA sources before Web Access.
+5. For an exact title or an explicit OA-only request, prefer:
 
    ```bash
-   node scripts/batch_download.mjs --title "<exact title>" --open-access --out "<project>"
+   node scripts/batch_download.mjs --title "<exact title>" --open-access --no-si --out "<project>"
    ```
 
    Use `--pdf-url` when the user supplies a known legitimate OA PDF URL.
-4. Verify the downloaded file and record the source. Mark a successful PDF as `open_access_downloaded`.
-5. If no lawful OA full text or PDF is found, report that clearly and mark `no_authorized_pdf_found`. Do not redirect the user into institutional setup unless they later say they have paid library access.
+6. Verify the downloaded file and record the source. Mark a successful PDF as `open_access_downloaded`.
+7. If no lawful OA full text is found, mark `oa_not_found`. For a supported publisher whose API already failed, request confirmation before Web Access. For another publisher, continue to Web Access. If `--route open_access` was explicitly requested, stop after the OA result.
+
+### Publisher API Credentials
+
+Configure credentials lazily, only when the route first needs them:
+
+```bash
+python3 scripts/configure_credentials.py set elsevier
+python3 scripts/configure_credentials.py set springer_nature
+python3 scripts/configure_credentials.py set ieee --fulltext-endpoint 'https://issued-endpoint.example/articles/{doi}'
+python3 scripts/configure_credentials.py set elsevier --stdin
+python3 scripts/configure_credentials.py show
+python3 scripts/configure_credentials.py validate <provider>
+python3 scripts/configure_credentials.py delete <provider>
+python3 scripts/configure_credentials.py contact-email researcher@example.org
+```
+
+Give the user the official registration link: Elsevier `https://dev.elsevier.com/`, Springer Nature `https://dev.springernature.com/docs/quick-start/api-access/`, or IEEE `https://developer.ieee.org/member/register`.
+
+Do not proactively ask the user to paste an API key into chat. If the user voluntarily sends a publisher API key, treat that as authorization to save that exact key: do not reject it, ask them to regenerate it, or repeat it back. Pass it to `configure_credentials.py set <provider> --stdin`, keep it out of command-line arguments, logs, replies, and manifests, then report only the masked confirmation and validation status. The local hidden prompt remains the preferred path when the key has not already been provided. IEEE Metadata API access is not paid full-text access; require the issued Full-Text Access endpoint/template before treating IEEE as downloadable through the API. Secrets are stored in `~/.config/lit-dl/credentials.json` with mode `0600`.
 
 ## Resource URL Triage
 
@@ -108,7 +133,7 @@ metaersp / metaauth / uas        Library resource aggregation portal
 webofscience / sciencedirect     Database or publisher entry; check whether it was reached through a portal
 ```
 
-If the URL is a login page with a `service=` parameter, treat the callback host as the resource service and do not make the login page the whole workflow. Example: `cas.whu.edu.cn/authserver/login?...service=uas.metaauth.com/...` means WHU CAS authenticates the user, then returns to the metaauth/UAS resource portal. If the user provides `https://whu.metaersp.cn/personalIndex`, use that portal as the starting resource entry and let it redirect to CAS only when needed.
+If the URL is a login page with a `service=` parameter, treat the callback host as the resource service and do not make the login page the whole workflow. For example, `https://login.university.example/authserver/login?service=https://resources.university.example/callback` means the identity service returns to the user's resource portal after authentication.
 
 ## Institution-Specific Domains
 
@@ -136,9 +161,9 @@ Use only the user's legitimate institutional access. Do not bypass paywalls, DRM
 
 **User handoff:** Ask the user only after the bounded attempt fails, or immediately when the page requires secret or identity-bearing input such as an image-selection answer, QR approval, SMS/OTP, passkey, hardware key, or two-factor authentication. Keep the challenged tab open and never ask the user to paste credentials or codes into chat.
 
-Avoid mass downloading. Work in small batches, preferably after the user confirms the paper list. Leave a clear audit trail of what was downloaded, from where, and whether supporting information was found.
+Avoid unbounded or indiscriminate downloading. Process only the definite paper list confirmed by the user, apply provider-friendly pacing, and leave a clear audit trail of what was downloaded, from where, and whether supporting information was found.
 
-Do not ask the user to paste institutional passwords, database passwords, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers a password, decline and use the handoff-login workflow instead.
+Do not ask the user to paste institutional passwords, database passwords, OTP codes, recovery codes, or session tokens into chat or terminal. If the user offers one of those identity-bearing secrets, decline and use the handoff-login workflow instead. Publisher API keys follow the separate save-on-receipt rule above.
 
 Exception for saved institutional login pages: if the user explicitly says that the browser has already filled credentials and authorizes clicking the visible login/confirm button, the agent may click that button once on the expected institutional SSO / CAS / CARSI / Shibboleth page without reading, copying, or typing any credential. This exception does not apply to CAPTCHA, QR login, SMS/OTP, publisher bot checks, consent/security warnings, or any page outside the expected institutional login flow.
 
@@ -182,12 +207,11 @@ Codex and other agent setups may instead use `.codex\skills` or `.agents\skills`
 
 ## Batch Scope
 
-Small batches are supported when the user provides a definite DOI/title/PMID list.
+Definite DOI/title/PMID lists are supported without a fixed per-batch paper-count recommendation.
 
-Recommended limits:
+Operational safeguards:
 
-- normal batch: 5-10 papers
-- upper practical batch: 15-20 papers, with pauses and a manifest
+- pace requests appropriately for each provider and maintain the manifest throughout the batch
 - attempt visible verification controls first; stop after at most two failed attempts, on institutional login expiry, or when an unusual/security-sensitive prompt appears
 
 Do not turn a broad keyword search into unlimited automatic downloading. Do not download whole journal issues, volumes, or large result sets.
@@ -202,6 +226,16 @@ downloaded_with_si
 open_access_downloaded
 full_text_html_available
 available_not_downloaded
+native_fulltext_downloaded
+si_confirmation_required
+credentials_missing
+credentials_invalid
+api_not_entitled
+api_fulltext_unavailable
+api_fallback_confirmation_required
+oa_not_found
+oa_resolution_inconclusive
+metadata_ambiguous
 carsi_waiting_user
 carsi_resolved_retry_needed
 publisher_verification_waiting_user
@@ -227,6 +261,8 @@ Use `carsi_waiting_user` only when the browser is visibly at an institutional SS
 Use `publisher_verification_waiting_user` or `sciencedirect_robot_check` when a publisher page shows a verification challenge but no automatic interaction was possible. When a bounded automatic attempt was made and failed, use `verification_auto_failed` instead. None of these is a final download failure.
 
 Use `open_access_downloaded` when a legitimate open-access route such as PMC, the publisher's OA PDF, arXiv, or another lawful open PDF source provides the downloaded PDF without institutional authorization.
+
+For a successful API-first download, record `oa_status: not_checked_api_first`; this means OA resolution was intentionally skipped, not that the article is non-OA. Use `api_fallback_confirmation_required` only after a supported publisher API attempt and its automatic OA fallback both fail.
 
 Use `full_text_html_available` when the library/full-text resolver grants access to a readable HTML full text but no valid PDF link or `%PDF` response is available. This is a successful full-text access result, not a PDF download. Save the HTML/text if the user asked for the article, and explicitly tell the user that the PDF was not available through the current authorized route.
 
@@ -268,35 +304,35 @@ If this hangs or fails:
 
 ## Fast Batch Path (default for 2+ papers — fast & token-efficient)
 
-For anything beyond a single paper, run `scripts/batch_download.mjs` instead of driving the browser step-by-step from the agent. It executes the whole chain (WoS search → record → DOI → publisher full text → download) inside Node + the CDP proxy, so **search DOMs and PDF bytes never enter the agent context** — only one compact JSON status line per paper comes back. A 10-paper run finishes in ~50s.
+For anything beyond a single paper, run `scripts/batch_download.mjs` instead of driving the browser step-by-step. OA and publisher APIs run without CDP; CNKI, Web Access, and requested SI lazily attach to the authenticated browser. Large DOMs and file bytes remain inside the scripts.
 
 The script reads `~/.config/lit-dl/school.json` automatically. When the config contains `discovery.web_of_science_url`, that URL is used as the Web of Science entry; otherwise the script falls back to its compiled default Web of Science URL.
 
 ```bash
 # by topic (collects N records from Web of Science Core Collection):
-node scripts/batch_download.mjs --topic "rice blast resistance gene" --count 10 --out "<project>"
+node scripts/batch_download.mjs --topic "rice blast resistance gene" --count 10 --no-si --out "<project>"
 # by explicit DOIs:
-node scripts/batch_download.mjs --dois "10.1007/s00122-021-03957-1,10.1111/pbi.14066" --out "<project>"
+node scripts/batch_download.mjs --dois "10.1007/s00122-021-03957-1,10.1111/pbi.14066" --no-si --out "<project>"
 # by exact open-access title (arXiv fallback, useful for DOI-less papers):
-node scripts/batch_download.mjs --title "Attention Is All You Need" --open-access --out "<project>"
+node scripts/batch_download.mjs --title "Attention Is All You Need" --open-access --no-si --out "<project>"
 # by Chinese exact title (default CNKI route):
-node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --out "<project>"
+node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --no-si --out "<project>"
 # by Chinese exact title, PDF only:
-node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --cnki-format pdf --out "<project>"
+node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --cnki-format pdf --no-si --out "<project>"
 # by Chinese exact title with a library-provided CNKI entry:
-node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --cnki-url "https://kns.cnki.net/kns8s/defaultresult/index" --out "<project>"
+node scripts/batch_download.mjs --title "乡村振兴背景下数字治理研究" --cnki-url "https://kns.cnki.net/kns8s/defaultresult/index" --no-si --out "<project>"
 # by known PDF URL:
-node scripts/batch_download.mjs --pdf-url "https://arxiv.org/pdf/1706.03762" --title "Attention Is All You Need" --out "<project>"
-# add --si only when the user asked for supporting information
+node scripts/batch_download.mjs --pdf-url "https://arxiv.org/pdf/1706.03762" --title "Attention Is All You Need" --no-si --out "<project>"
+# replace --no-si with --si only after the user explicitly requests SI
 ```
 
-Output: `{ summary:{total,downloaded,seconds}, results:[{doi,status,file,bytes}] }`. Per-paper `status` follows the **canonical Status Categories list above** (L83-98) — e.g. `downloaded`, `downloaded_with_si`, `carsi_waiting_user`, `publisher_verification_waiting_user`, `sciencedirect_robot_check`, `publisher_blocked_waiting_user`, `no_full_text_link`, `no_authorized_pdf_found`, `pdf_fetch_failed`, `failed_after_retry`, `do_not_auto_retry`. The stderr short tags `[dl]`/`[wos]`/`[doi]`/`[cnki]` are for readability only and are NOT status codes; JSON `status` always uses the canonical names. The script saves PDFs under `<project>/PDFs/`; CNKI CAJ files, when only CAJ is available, are saved under `<project>/CNKI/`; pass `--cnki-format pdf` to require a CNKI PDF link and avoid saving CAJ. Pipe its JSON into the manifest. Pass `--legacy-status` to emit the old short codes (`needs_user_login`, `needs_user_verify`, `publisher_blocked`, `no_pdf_link`, `error`) for backward-compatible manifest consumers.
+Output includes `{ summary, manifest, results }`. The script writes `<project>/manifest.json` with route, OA evidence, access mode, format, MIME, bytes, SHA-256, SI choice, and typed failures; secret-looking fields are removed recursively. PDFs go under `PDFs/`, native HTML/XML under `FullText/`, CAJ under `CNKI/`, and supplements under `SupportingInformation/`.
 
 **Token discipline (applies to all paths):** never `eval` a whole page DOM, search result, or PDF/SI bytes back into the agent context. Keep large data inside Node/`scripts/*.mjs` and surface only compact status. Reserve interactive `/eval` + `cdp_open_url.mjs` for the single-paper route below or for diagnosing one stuck paper after the batch run.
 
-## Recommended Download Workflow (Web of Science entry — single paper / fallback)
+## Recommended Web Access Workflow (other publishers and confirmed API-plus-OA fallback)
 
-For institution-authorized access, start from Web of Science or the user's configured library resource portal. **Web of Science is the preferred discovery hub for library-routed papers — do not resolve or group by publisher first when the configured library route is available.** WoS searches by title or DOI, then exposes full-text links that carry the institutional session through to SFX/OpenURL, Ovid, or the publisher.
+Use this section only after legitimate OA sources are unavailable: directly for English publishers outside Elsevier/Springer Nature/IEEE, or after the user explicitly accepts Web Access fallback when both a supported publisher API and the OA fallback failed. Start from Web of Science or the configured library portal and reuse the user's authenticated browser session.
 
 Before using the library route, check for legitimate open-access availability when the article metadata suggests OA or the user provides an OA/open journal paper. Use PMC, publisher OA links, arXiv, DOI landing pages with clear open PDF access, or a known lawful PDF URL. If an OA PDF is available, download and verify it directly, mark `open_access_downloaded`, and record the OA source in the manifest. Do not require institutional login for an article that is already openly available.
 
@@ -403,8 +439,8 @@ id	project	title	doi	year	venue	publisher	failure_stage	status	source_url	curren
 Suggested `next_action` values:
 
 ```text
-user_complete_jaccount_in_chrome
-select_sjtu_in_carsi_wayf
+user_complete_institution_login_in_chrome
+select_institution_in_federation_wayf
 retry_same_tab_after_user_confirms
 repair_url_by_doi
 try_aggregation_entry_route
@@ -419,7 +455,7 @@ Use the bundled script when a PDF URL opens in Chrome but direct shell download 
 
 ```powershell
 $node = "$env:LOCALAPPDATA\OpenAI\Codex\bin\node.exe"
-& $node "$env:USERPROFILE\.agents\skills\sjtu-literature-downloader\scripts\browser_pdf_downloader.mjs" `
+& $node "$env:USERPROFILE\.agents\skills\nature-downloader\scripts\browser_pdf_downloader.mjs" `
   --url "https://www.sciencedirect.com/science/article/pii/SXXXXXXXXXXXXXXXX/pdfft" `
   --out "D:\path\paper.pdf"
 ```
@@ -445,7 +481,7 @@ Useful options:
 
 ## Supporting Information
 
-**Do not download supporting information by default — download the main PDF only.** Fetch SI only when the user explicitly asks for it (e.g. "连补充材料一起下", "include SI", "download supplementary", "把补充材料也下了"). When you skip SI, still glance at the landing page and record in the manifest whether SI appears to exist (`si_status = available_not_downloaded`) so the user can ask for it later; do not spend extra navigation just to enumerate the files.
+**Always confirm SI before file download.** Fetch SI only when the user explicitly chooses it (e.g. "连补充材料一起下", "include SI", "download supplementary", "把补充材料也下了"). When the user chooses no, pass `--no-si` and do not perform extra attachment navigation.
 
 When the user does ask for supporting information, use this method:
 
@@ -459,6 +495,18 @@ When the user does ask for supporting information, use this method:
    - `_si_`
    - `mmc1`, `mmc2` (Elsevier/ScienceDirect supplement pattern)
 3. Download every PDF/DOCX/XLSX/video/data file that is clearly a legitimate supplement, using the browser context if needed.
+
+For the WoS batch route, an explicit SI request maps to `--si`. When an exact title is known, pass it as both `--topic` and `--title` with `--count 1`. WoS + `--si` must:
+
+- keep each paper in its own readable-title folder;
+- place only the verified main PDF and clearly labelled SI files in that folder;
+- preserve original attachment names when available;
+- follow a supplementary landing page at most one level deep;
+- exclude external repository links such as GitHub, Zenodo, Figshare, Dryad, and OSF;
+- keep the main PDF and report `si.status = not_found` when no SI exists;
+- report `partial` when some SI files fail without treating the main PDF as failed.
+
+Do not apply the clean per-article folder behavior to CNKI, `--open-access`, bare `--pdf-url`, or direct `--dois` routes.
 
 ACS fallback pattern, only after verifying the DOI and article page:
 
@@ -476,7 +524,7 @@ For PDFs:
 
 ```powershell
 $env:PYTHONUTF8='1'
-python -X utf8 "$env:USERPROFILE\.claude\skills\sjtu-literature-downloader\scripts\extract_pdf_text.py" `
+python -X utf8 "$env:USERPROFILE\.claude\skills\nature-downloader\scripts\extract_pdf_text.py" `
   --pdf "D:\path\paper.pdf" `
   --pages 3
 ```
@@ -532,14 +580,14 @@ If shell `Invoke-WebRequest` or `curl` returns 403 but the PDF opens in Chrome:
 
 If a page shows publisher bot verification, CAPTCHA, Cloudflare, QR login, SMS/OTP, or another security challenge:
 
-- Do not ask for or accept credentials in chat.
+- Do not ask for or accept institutional credentials in chat. Publisher API keys follow the separate save-on-receipt rule.
 - Pause and ask the user to complete the verification in Chrome.
 - Record `publisher_verification_waiting_user` in `publisher_verification.tsv`, or `sciencedirect_robot_check` for ScienceDirect.
 - Continue only after the user says the browser step is complete.
 
 If a page shows institutional SSO, CAS, CARSI/Shibboleth, OpenAthens, SAML, federation/WAYF/机构选择, database login, or IP-login options:
 
-- Do not ask for or accept credentials in chat.
+- Do not ask for or accept institutional credentials in chat. Publisher API keys follow the separate save-on-receipt rule.
 - If the user has explicitly authorized it and the browser has already filled credentials, click the visible login/confirm button once.
 - Otherwise pause and ask the user to complete the login in the browser.
 - Record `carsi_waiting_user` or `carsi_resolved_retry_needed` in `carsi_retry.tsv` as appropriate.

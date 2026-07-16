@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const DEFAULT_DISCOVERY_URL = "https://webofscience.clarivate.cn/wos/woscc/basic-search";
+export const DEFAULT_DISCOVERY_URL = "https://www.webofscience.com/wos/woscc/basic-search";
 
 export function configPathFromEnv(env = process.env) {
   const dir = env.LIT_DL_CONFIG_DIR || path.join(os.homedir(), ".config", "lit-dl");

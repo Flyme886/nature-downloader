@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_CNKI_URL,
   cnkiSearchUrl,
+  createCnkiTransport,
   filterCnkiDownloadCandidates,
   isCnkiUrl,
   looksChinese,
+  legacyCnkiDetailUrl,
   safeCnkiFileName,
 } from "../../scripts/lib/cnki.mjs";
 
@@ -43,5 +45,20 @@ describe("CNKI helpers", () => {
     ];
     assert.deepEqual(filterCnkiDownloadCandidates(candidates, "pdf"), [candidates[1]]);
     assert.deepEqual(filterCnkiDownloadCandidates(candidates, "any"), candidates);
+  });
+
+  test("keeps browser/FSSO/WebVPN access behind one transport seam", () => {
+    assert.equal(createCnkiTransport({ mode: "fsso" }).resolve("https://kns.cnki.net/a"), "https://kns.cnki.net/a");
+    assert.equal(
+      createCnkiTransport({ mode: "webvpn", webvpnUrlTemplate: "https://vpn.example/proxy?url={url}" }).resolve("https://kns.cnki.net/a"),
+      "https://vpn.example/proxy?url=https%3A%2F%2Fkns.cnki.net%2Fa"
+    );
+  });
+
+  test("builds the legacy CNKI detail fallback from strong identifiers", () => {
+    const url = new URL(legacyCnkiDetailUrl({ filename: "ABC123", dbcode: "CJFD" }));
+    assert.equal(url.pathname, "/kcms/detail/detail.aspx");
+    assert.equal(url.searchParams.get("filename"), "ABC123");
+    assert.equal(url.searchParams.get("dbcode"), "CJFD");
   });
 });

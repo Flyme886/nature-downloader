@@ -186,7 +186,7 @@ KNOWN_DATABASES = [
 if __name__ == "__main__":
     # 自检示例
     print("=== SSO 域名校验 ===")
-    ok, msg = validate_sso_domain("jaccount.sjtu.edu.cn")
+    ok, msg = validate_sso_domain("login.university.example")
     print(f"  {ok}: {msg}")
 
     print("\n=== CARSI 入口校验 ===")

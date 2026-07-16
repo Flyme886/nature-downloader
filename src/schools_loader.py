@@ -1,4 +1,7 @@
-"""预设学校库加载与匹配模块。"""
+"""Optional user-maintained institution preset loader.
+
+The distributed schools.yaml is intentionally empty.
+"""
 
 from __future__ import annotations
 
@@ -122,13 +125,4 @@ def list_school_names() -> list[str]:
 
 if __name__ == "__main__":
     schools = load_schools()
-    print(f"预设学校库共 {len(schools)} 所")
-    for s in schools[:5]:
-        print(f"  - {s['name']} ({', '.join(s.get('aliases', []))})")
-    if len(schools) > 5:
-        print(f"  ... 还有 {len(schools) - 5} 所")
-
-    print("\n=== 匹配测试 ===")
-    for q in ["交大", "SJTU", "清华", "复旦", "不存在的学校"]:
-        m = match_school(q)
-        print(f"  '{q}' -> {m['name'] if m else '未匹配'}")
+    print(f"用户维护的机构预设数量：{len(schools)}")

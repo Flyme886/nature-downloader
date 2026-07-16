@@ -1,164 +1,172 @@
 # nature-downloader
 
 <p align="center">
-  <img src="assets/banner.jpg" alt="nature-downloader — 补齐 nature 工作流缺失的 PDF 落地环节" width="100%">
+  <img src="assets/banner.jpg" alt="nature-downloader — 合法 OA、出版商 API 与机构授权全文下载" width="100%">
 </p>
 
-`nature-downloader` 是一个合法机构权限下的学术全文/PDF 下载 skill。它把两部分能力合在一起：
-
-- **首次资源入口配置**：先记录用户实际使用的图书馆电子资源链接，再识别学校、SSO/CARSI/EZproxy/WebVPN/资源聚合平台信息，配置保存到 `~/.config/lit-dl/school.json`。
-- **真实全文落地**：通过用户已经登录的 Chrome 会话和 web-access CDP proxy，复用本人的图书馆/CARSI/出版社访问权限，把能合法访问的 PDF 保存到项目文件夹；如果馆藏只提供 HTML 全文，则保存 HTML/文本并明确说明没有 PDF。
-- **中文文献默认知网**：按中文题名下载时，默认优先走用户已登录/已授权的 CNKI/知网页面；可通过学校配置或 `--cnki-url` 指定图书馆提供的知网入口。
-- **开放获取优先**：若文献本身是开放获取或开源期刊文章，直接走合法开放 PDF；若图书馆资源明确无权限，直接告诉用户。
-
-它不绕过付费墙，不使用镜像站，不读取或导出 cookies、密码、localStorage、session 文件。遇到可见滑块、复选框、人机检查或简单验证按钮时，会先在同一个已登录 Chrome 标签页内进行至多两次有限尝试；仅在尝试失败，或遇到图片选择、二维码确认、短信/OTP、Passkey、硬件密钥和双重认证时，才交给用户本人完成。
-
-## 快速使用
-
-把下面这句话复制给 agent，即可让它自动完成首次配置引导：
+`nature-downloader` 按文献语言、出版商和可用凭据自动选择合法下载路线：
 
 ```text
-请使用 nature-downloader 帮我完成首次图书馆资源配置：先向我索要图书馆电子资源/数据库入口链接，识别授权路径并保存配置；如果需要登录，请引导我在 Chrome 中完成统一身份认证/CARSI 登录；最后运行配置展示和连通性自检，确认后续可复用该图书馆资源下载文献。
+确认是否下载 SI
+→ 中文文献：只走 CNKI / 知网机构授权
+→ 英文文献
+   ├─ Elsevier / Springer Nature / IEEE 且有可用 Key
+   │  ├─ 出版商 API 成功：结束，不强制判断 OA
+   │  └─ API 失败：PMC → Unpaywall → 出版商 OA / 合法仓储
+   └─ 其他出版商：先查 OA，OA 不可用时走 Web Access 机构授权
 ```
 
-### 1. 配置资源入口
+不绕过付费墙、DRM、验证码或双重认证，不读取或导出浏览器 cookie、密码、localStorage 或 session 文件。
 
-全新用户优先提供图书馆电子资源/数据库入口链接，而不是先填学校名：
+## 下载前必须确认 SI
+
+所有下载命令必须显式选择一次：
 
 ```bash
-python3 scripts/configure_school.py infer "https://whu.metaersp.cn/personalIndex"
-python3 scripts/configure_school.py url "https://whu.metaersp.cn/personalIndex"
+--no-si  # 只下载正文
+--si     # 下载正文和可找到的 Supporting Information
+```
+
+两者均未提供时，脚本返回 `si_confirmation_required`，且不会创建输出目录或下载文件。两者同时提供时参数校验失败。批量任务的选择作用于整个批次。
+
+## 配置
+
+### 图书馆与 CNKI
+
+优先保存用户实际使用的图书馆资源入口：
+
+```bash
+python3 scripts/configure_school.py infer "https://example.edu/library/resources"
+python3 scripts/configure_school.py url "https://example.edu/library/resources"
 python3 scripts/configure_school.py show
-```
-
-`infer` 只判断授权路径不保存，`url` 会写入配置。比如武汉大学 `whu.metaersp.cn` 会被识别为资源聚合门户，后续需要登录时再跳转到 `cas.whu.edu.cn`。
-
-如果没有资源入口链接，再用预设学校兜底：
-
-```bash
-python3 scripts/configure_school.py preset 上海交通大学
-python3 scripts/configure_school.py show
-```
-
-查看可用预设：
-
-```bash
-python3 scripts/configure_school.py list
-```
-
-运行连通性自检：
-
-```bash
 python3 scripts/configure_school.py health --force
 ```
 
-配置路径默认是 `~/.config/lit-dl/school.json`。测试或多 profile 场景可以用 `LIT_DL_CONFIG_DIR=/path/to/configdir` 覆盖。
+普通配置保存在 `~/.config/lit-dl/school.json`。
 
-### 2. 准备浏览器登录态
+### 出版商 API
 
-1. 在 Chrome 里打开本校图书馆或学术资源聚合入口。
-2. 用本人账号完成统一身份认证/CARSI 登录。
-3. 确认 Web of Science 或目标出版商页面能在 Chrome 中正常看到全文入口。
-4. 打开 `chrome://inspect/#remote-debugging`，允许当前浏览器实例远程调试。
-5. 启动 web-access CDP proxy。
+非 OA 英文文献命中对应出版商时才需要配置：
 
-### 3. 下载文献
+- Elsevier：[Developer Portal](https://dev.elsevier.com/)
+- Springer Nature：[API Access](https://dev.springernature.com/docs/quick-start/api-access/)
+- IEEE：[Developer Registration](https://developer.ieee.org/member/register)
 
-按 DOI 下载：
+使用隐藏输入保存 API key：
+
+```bash
+python3 scripts/configure_credentials.py set elsevier
+python3 scripts/configure_credentials.py set springer_nature
+python3 scripts/configure_credentials.py set ieee --fulltext-endpoint 'https://issued-endpoint.example/articles/{doi}'
+python3 scripts/configure_credentials.py show
+python3 scripts/configure_credentials.py validate elsevier
+python3 scripts/configure_credentials.py delete elsevier
+```
+
+当用户已经主动在对话中提供出版商 API key 时，agent 应直接使用标准输入安全保存，不要求重新生成，也不在命令参数、回复或 manifest 中回显：
+
+```bash
+python3 scripts/configure_credentials.py set elsevier --stdin
+```
+
+未主动提供时仍优先使用本地隐藏输入。机构密码、OTP、Cookie 和会话令牌不适用此规则。
+
+Elsevier 获得机构 token 时可额外传入 `--insttoken` 或 `--authtoken`。IEEE 普通 Metadata API key 不代表收费全文权限；只有获得 Full-Text Access API 产品后，才配置由 IEEE 提供的 endpoint 模板。秘密保存在 `~/.config/lit-dl/credentials.json`，文件权限为 `0600`，展示时只显示末四位。
+
+Unpaywall 需要合规联系邮箱：
+
+```bash
+python3 scripts/configure_credentials.py contact-email researcher@example.org
+```
+
+该邮箱保存在非秘密配置 `~/.config/lit-dl/settings.json`。
+
+## 下载示例
+
+按 DOI 下载正文：
 
 ```bash
 node scripts/batch_download.mjs \
   --dois "10.1007/s00122-021-03957-1,10.1111/pbi.14066" \
+  --no-si \
   --out "./文献自动下载"
 ```
 
-按中文题名下载，默认走知网：
+中文题名只走知网：
 
 ```bash
 node scripts/batch_download.mjs \
   --title "乡村振兴背景下数字治理研究" \
+  --no-si \
   --out "./文献自动下载"
 ```
 
-如果只要 PDF、不要 CAJ，加 `--cnki-format pdf`。这样在知网没有明确 PDF 下载入口时，脚本会报出未找到可授权 PDF，而不会保存 `.caj`：
+默认 PDF 优先、允许 CAJ；只接受 PDF 时增加 `--cnki-format pdf`。学校提供专用知网入口时增加 `--cnki-url URL`。
 
-```bash
-node scripts/batch_download.mjs \
-  --title "乡村振兴背景下数字治理研究" \
-  --cnki-format pdf \
-  --out "./文献自动下载"
-```
-
-如果学校图书馆提供了专用知网入口，可显式指定：
-
-```bash
-node scripts/batch_download.mjs \
-  --title "乡村振兴背景下数字治理研究" \
-  --cnki-url "https://kns.cnki.net/kns8s/defaultresult/index" \
-  --out "./文献自动下载"
-```
-
-按主题从 Web of Science 检索并下载前 N 篇：
-
-```bash
-node scripts/batch_download.mjs \
-  --topic "rice blast resistance gene" \
-  --count 10 \
-  --out "./文献自动下载"
-```
-
-按精确题名下载开放获取论文（适合 arXiv 论文、无 DOI 论文）：
+英文 OA 精确题名：
 
 ```bash
 node scripts/batch_download.mjs \
   --title "Attention Is All You Need" \
   --open-access \
+  --no-si \
   --out "./文献自动下载"
 ```
 
-已知 PDF 地址时直接下载并验证：
+主题检索并下载 SI：
+
+```bash
+node scripts/batch_download.mjs \
+  --topic "rice blast resistance gene" \
+  --count 10 \
+  --si \
+  --out "./文献自动下载"
+```
+
+已知合法全文 URL：
 
 ```bash
 node scripts/batch_download.mjs \
   --pdf-url "https://arxiv.org/pdf/1706.03762" \
   --title "Attention Is All You Need" \
+  --no-si \
   --out "./文献自动下载"
 ```
 
-默认只下载主 PDF。只有明确需要补充材料时才加：
+元数据冲突时可用 `--language zh|en` 或 `--route cnki|open_access|elsevier|springer_nature|ieee|web_access` 覆盖。`--source-url` 指向 CNKI 时强制中文 CNKI 路由。
+
+## API 失败与 Web Access 回退
+
+三家 API 返回无 entitlement 或无全文时，会先自动尝试 PMC、Unpaywall、出版商 OA 和合法仓储。只有 API 与 OA 都未取得全文时，才返回 `api_fallback_confirmation_required`；确认后按出版商重新运行：
 
 ```bash
-node scripts/batch_download.mjs --dois "10.xxxx/example" --out "./文献自动下载" --si
+--api-fallback-web-for elsevier
+--no-api-fallback-web-for springer_nature
 ```
 
-输出目录：
+全批次统一选择也可使用 `--api-fallback-web` 或 `--no-api-fallback-web`。Web Access 复用用户已登录的 Chrome 机构会话；登录、QR、OTP 和复杂验证仍由用户本人完成。
+
+如果 PMC/Unpaywall 等 OA 检查无法确认文章状态，manifest 会记录 OA assessment 为 `unknown`，但不会把它误标为非 OA；后续仍可使用机构 Web Access 寻找授权全文。
+
+## 输出
 
 ```text
 文献自动下载/
   PDFs/
+  FullText/
+  CNKI/
   SupportingInformation/
+  manifest.json
 ```
 
-脚本会输出 JSON 状态，常见状态包括 `downloaded`、`open_access_downloaded`、`full_text_html_available`、`library_no_permission`、`carsi_waiting_user`、`publisher_verification_waiting_user`、`sciencedirect_robot_check`、`no_authorized_pdf_found`、`failed_after_retry`。当状态是 `full_text_html_available` 时，表示已拿到可读 HTML 全文，但当前授权路径没有有效 PDF，回复用户时必须说清楚；当状态是 `library_no_permission` 时，表示当前图书馆资源没有该文献全文权限，也必须直接说明。
+`manifest.json` 记录规范 DOI、语言、出版商、路由、OA 证据、访问模式、正文格式、MIME、大小、SHA-256、SI 选择和失败原因，并递归移除 API key、token、cookie 等秘密字段。
 
-## 当前实现边界
+正文成功格式包括：
 
-- 已实现：学校配置、配置文件读写、预设库、连通性自检、Web of Science 入口配置读取、Chrome 登录态下 PDF 下载、PDF 文件头验证、状态码体系。
-- 已实现：中文题名默认 CNKI/知网路由，复用 Chrome 中已有的图书馆/知网登录态下载可授权访问的 PDF/CAJ；可用 `--cnki-format pdf` 限制为只下载 PDF。
-- 已验证路径：以上海交通大学/SJTU + Web of Science + CARSI/Chrome 会话为主要真实下载路径。
-- 新用户首配策略：优先从图书馆资源入口链接识别授权链路；学校预设只作为兜底。
-- 已验证开放获取路径：`--title "Attention Is All You Need" --open-access` 会精确匹配 arXiv 标题并下载 PDF。
-- 工作流策略：开放获取文章直接下载；非开放获取文章走已配置图书馆资源；馆藏无权限时明确告知用户。
-- 可扩展路径：其他学校可通过 `data/schools.yaml` 配置 SSO/CARSI 和 `discovery.web_of_science_url`。
-- 不承诺：无登录态下载、绕过出版社限制、自动处理图片验证码/OTP/复杂 Cloudflare 挑战、无限批量下载；可见滑块、复选框和简单验证控件会先有限尝试。
-- 注意：`--topic` 是 Web of Science 主题检索，不保证精确题名命中；精确题名优先使用 `--title`。
-
-## 依赖
-
-```bash
-pip install -r requirements.txt
-node --version  # 推荐 Node.js 22+
-```
+- PDF：`downloaded` / `open_access_downloaded`
+- CNKI CAJ、Springer JATS/XML：`native_fulltext_downloaded`
+- 可读 HTML 全文：`full_text_html_available`
+- 正文和 SI：`downloaded_with_si`
 
 ## 验证
 
@@ -168,5 +176,3 @@ node --test tests/unit/*.test.mjs
 node --check scripts/batch_download.mjs
 node --check scripts/browser_pdf_downloader.mjs
 ```
-
-详见 `SKILL.md` 了解完整工作流、安全边界、状态码体系和失败处理。
