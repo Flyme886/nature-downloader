@@ -5,7 +5,7 @@
 
 <h1>📚 nature-downloader</h1>
 
-<p><strong>通过学校图书馆资源全自动下载文献 爽！</strong></p>
+<p><strong>通过学校图书馆资源全自动下载文献 爽爽爽！</strong></p>
 
 <hr>
 
