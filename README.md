@@ -5,7 +5,7 @@
 
 <h1>📚 nature-downloader</h1>
 
-<p><strong>把合法的全文下载，变成一次清晰的命令。</strong></p>
+<p><strong>通过学校图书馆资源全自动下载文献 爽！</strong></p>
 
 <hr>
 
