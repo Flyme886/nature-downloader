@@ -148,8 +148,8 @@ python3 scripts/configure_credentials.py contact-email researcher@example.org
 | <code>--title</code> | 按题名下载 |
 | <code>--topic</code> + <code>--count</code> | 主题检索并批量下载 |
 | <code>--pdf-url</code> | 从已知合法全文 URL 下载 |
-| <code>--language zh\|en</code> | 元数据冲突时覆盖语言判断 |
-| <code>--route cnki\|open_access\|elsevier\|springer_nature\|ieee\|web_access</code> | 覆盖路由 |
+| <code>--language zh|en</code> | 元数据冲突时覆盖语言判断 |
+| <code>--route cnki|open_access|elsevier|springer_nature|ieee|web_access</code> | 覆盖路由 |
 | <code>--out</code> | 指定输出目录 |
 | <code>--si</code> / <code>--no-si</code> | 选择是否下载 SI |
 
